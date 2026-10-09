@@ -11,7 +11,7 @@ node test/sintaxis-html.js || fallos=$((fallos+1))
 node -e "JSON.parse(require('fs').readFileSync('public/manifest.webmanifest','utf8'))" \
   && echo "  ✅ manifest.webmanifest" || fallos=$((fallos+1))
 
-for suite in worker.test.mjs datos.test.js sw.test.js sync.test.js validacion.test.js; do
+for suite in worker.test.mjs datos.test.js sw.test.js sync.test.js validacion.test.js dashboard.test.js; do
   echo
   echo "── $suite ─────────────────────────────────────────"
   # timeout duro: una suite colgada no puede bloquear el resto.

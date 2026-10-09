@@ -310,6 +310,30 @@ svg text{font-family:var(--font-body)}
     {id:"En_tratamiento",  label:"En tratamiento"},
     {id:"Adjudicada",      label:"Adjudicada"}
   ];
+  var SIN_PARQUE = "(sin parque)";
+  var SIN_SITUACION = "(sin situación)";
+
+  // Los dos gráficos "por parque" se contradecían: el de m² agregaba
+  // CUALQUIER valor de parque_industrial que apareciera en los datos,
+  // mientras que el anual solo iteraba la constante PARQUES. Un parque con
+  // typo, heredado o cargado desde otra versión salía en un gráfico y
+  // desaparecía del otro — y del total que se dibuja encima de cada barra.
+  // Ahora los dos usan la misma lista: los conocidos primero, en su orden
+  // fijo, y después cualquier otro que realmente esté en los datos.
+  function parquesDe(list){
+    var extra = [];
+    list.forEach(function(e){
+      var p = e.parque_industrial || SIN_PARQUE;
+      if(PARQUES.indexOf(p) === -1 && extra.indexOf(p) === -1) extra.push(p);
+    });
+    extra.sort();
+    return PARQUES.concat(extra);
+  }
+  function parqueDe(e){ return e.parque_industrial || SIN_PARQUE; }
+  function colorParque(p){
+    return PARQUE_COLOR[p] ? "var("+PARQUE_COLOR[p]+")" : "var(--idle)";
+  }
+
   var STORAGE_KEY = "cartas_intencion_parques_v2";
   var PLAZO_KEY = "cartas_intencion_plazo_v1";
   var DEMO_KEY = "cartas_intencion_demo_descartada_v1";
@@ -803,7 +827,11 @@ svg text{font-family:var(--font-body)}
       if(state.filterRubro && e.rubro!==state.filterRubro) return false;
       if(state.filterSituacion && e.situacion!==state.filterSituacion) return false;
       if(state.search){
-        var blob = (e.nombre_empresa+" "+e.actividad_empresa+" "+e.nro_expediente+" "+e.representante_nombre).toLowerCase();
+        // Concatenar directo metía la cadena "undefined" en el blob cuando
+        // faltaba un campo, así que buscar "undefined" matcheaba registros
+        // incompletos.
+        var blob = [e.nombre_empresa, e.actividad_empresa, e.nro_expediente, e.representante_nombre]
+          .filter(Boolean).join(" ").toLowerCase();
         if(blob.indexOf(state.search)===-1) return false;
       }
       return true;
@@ -863,7 +891,14 @@ svg text{font-family:var(--font-body)}
     var list = state.expedientes;
     var totalM2 = list.reduce(function(a,e){return a+(Number(e.superficie_solicitada_m2)||0);},0);
     var porSituacion = {Sin_tratamiento:0, En_tratamiento:0, Adjudicada:0};
-    list.forEach(function(e){ if(porSituacion[e.situacion]!=null) porSituacion[e.situacion]++; });
+    // Las situaciones desconocidas se contaban en el total pero en ninguno de
+    // los tres tiles, así que los números no cerraban. Ahora van a un bucket
+    // propio que solo aparece si tiene algo.
+    var situacionDesconocida = 0;
+    list.forEach(function(e){
+      if(porSituacion[e.situacion]!=null) porSituacion[e.situacion]++;
+      else situacionDesconocida++;
+    });
 
     var ultimaActualizacion = list.reduce(function(max,e){
       var d = parseFechaLocal((e.fecha_ultimo_movimiento||"").split(" ")[0]);
@@ -878,18 +913,21 @@ svg text{font-family:var(--font-body)}
       tile(totalM2.toLocaleString("es-AR")+" m²", "Superficie total solicitada") +
       tile(porSituacion.Adjudicada, "Adjudicados") +
       tile(porSituacion.En_tratamiento, "En tratamiento") +
-      tile(porSituacion.Sin_tratamiento, "Sin tratamiento");
+      tile(porSituacion.Sin_tratamiento, "Sin tratamiento") +
+      (situacionDesconocida ? tile(situacionDesconocida, "Situación sin reconocer") : "");
 
     // -- m² por parque (barras horizontales, un solo color) --
+    var parques = parquesDe(list);
     var m2PorParque = {};
-    PARQUES.forEach(function(p){ m2PorParque[p]=0; });
-    list.forEach(function(e){ if(e.parque_industrial) m2PorParque[e.parque_industrial] = (m2PorParque[e.parque_industrial]||0) + (Number(e.superficie_solicitada_m2)||0); });
+    parques.forEach(function(p){ m2PorParque[p]=0; });
+    list.forEach(function(e){ m2PorParque[parqueDe(e)] += (Number(e.superficie_solicitada_m2)||0); });
     renderBarList("chartM2", m2PorParque, function(v){ return v.toLocaleString("es-AR")+" m²"; });
 
     // -- situación (barras horizontales, color por status) --
     var sitColor = {Adjudicada:"var(--ok)", En_tratamiento:"var(--warn)", Sin_tratamiento:"var(--idle)"};
     var sitData = {};
     SITUACIONES.forEach(function(s){ sitData[s.label] = porSituacion[s.id]; });
+    if(situacionDesconocida) sitData[SIN_SITUACION] = situacionDesconocida;
     renderBarList("chartSituacion", sitData, function(v){return String(v);}, function(label){
       var s = SITUACIONES.find(function(x){return x.label===label;});
       return s ? sitColor[s.id] : "var(--accent)";
@@ -901,7 +939,7 @@ svg text{font-family:var(--font-body)}
     renderBarList("chartRubro", porRubro, function(v){return String(v);}, null, true);
 
     // -- solicitudes anuales por parque (barras apiladas SVG) --
-    renderAnual(list);
+    renderAnual(list, parques);
   }
 
   function renderBarList(containerId, dataObj, fmt, colorFn, sortDesc){
@@ -924,14 +962,16 @@ svg text{font-family:var(--font-body)}
     }).join("");
   }
 
-  function renderAnual(list){
+  function renderAnual(list, parques){
     var porAnio = {}; // {anio: {parque: count}}
+    var sinFecha = 0;
     list.forEach(function(e){
       var d = parseFechaLocal(e.fecha_inicio);
-      if(!d) return;
+      if(!d){ sinFecha++; return; }
       var anio = d.getFullYear();
       porAnio[anio] = porAnio[anio] || {};
-      porAnio[anio][e.parque_industrial] = (porAnio[anio][e.parque_industrial]||0) + 1;
+      var p = parqueDe(e);
+      porAnio[anio][p] = (porAnio[anio][p]||0) + 1;
     });
     var anios = Object.keys(porAnio).sort();
     var svg = document.getElementById("chartAnual");
@@ -944,7 +984,7 @@ svg text{font-family:var(--font-body)}
     var W=560,H=260, padL=34, padB=28, padT=12, padR=10;
     var plotW = W-padL-padR, plotH = H-padT-padB;
     var totales = anios.map(function(a){
-      return PARQUES.reduce(function(s,p){ return s+(porAnio[a][p]||0); },0);
+      return parques.reduce(function(s,p){ return s+(porAnio[a][p]||0); },0);
     });
     var max = Math.max.apply(null, totales.concat([1]));
     var niceMax = Math.ceil(max/5)*5 || 5;
@@ -964,12 +1004,12 @@ svg text{font-family:var(--font-body)}
     anios.forEach(function(anio, idx){
       var x0 = padL + idx*slot + (slot-barW)/2;
       var yCursor = padT+plotH;
-      PARQUES.forEach(function(p){
+      parques.forEach(function(p){
         var v = porAnio[anio][p]||0;
         if(!v) return;
         var hgt = (v/niceMax)*plotH;
         yCursor -= hgt;
-        svgParts.push('<rect x="'+x0+'" y="'+yCursor+'" width="'+barW+'" height="'+Math.max(hgt-2,0)+'" rx="2" fill="var('+PARQUE_COLOR[p]+')"><title>'+esc(p)+' '+anio+': '+v+'</title></rect>');
+        svgParts.push('<rect x="'+x0+'" y="'+yCursor+'" width="'+barW+'" height="'+Math.max(hgt-2,0)+'" rx="2" fill="'+colorParque(p)+'"><title>'+esc(p)+' '+anio+': '+v+'</title></rect>');
       });
       svgParts.push('<text x="'+(x0+barW/2)+'" y="'+(padT+plotH+18)+'" text-anchor="middle" font-size="11" fill="var(--muted)">'+anio+'</text>');
       var total = totales[idx];
@@ -977,12 +1017,15 @@ svg text{font-family:var(--font-body)}
     });
     svg.innerHTML = svgParts.join("");
 
-    var parquesConDatos = PARQUES.filter(function(p){
+    var parquesConDatos = parques.filter(function(p){
       return anios.some(function(a){ return (porAnio[a][p]||0)>0; });
     });
     legend.innerHTML = parquesConDatos.map(function(p){
-      return '<span><i style="background:var('+PARQUE_COLOR[p]+')"></i>'+esc(p)+'</span>';
-    }).join("");
+      return '<span><i style="background:'+colorParque(p)+'"></i>'+esc(p)+'</span>';
+    }).join("") +
+    // Un expediente sin fecha válida no entra en ningún año. Antes se perdía
+    // sin dejar rastro; ahora el gráfico dice cuántos no está mostrando.
+    (sinFecha ? '<span>'+esc(sinFecha+(sinFecha===1?" expediente sin fecha válida":" expedientes sin fecha válida")+", fuera del gráfico")+'</span>' : "");
   }
 
   // ---- Modal: nuevo / editar ----
