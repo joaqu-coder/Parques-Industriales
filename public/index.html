@@ -105,6 +105,7 @@ svg text{font-family:var(--font-body)}
 .urg-amarillo{background:var(--warn-bg);color:var(--warn)}
 .urg-verde{background:var(--ok-bg);color:var(--ok)}
 .urg-na{color:var(--muted)}
+.urg-aviso{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.4}
 
 /* ---- Modal ---- */
 .veil{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:20;padding-top:40px}
@@ -120,6 +121,9 @@ svg text{font-family:var(--font-body)}
 .field input,.field select,.field textarea{background:var(--surface-2);border:1px solid var(--border);color:var(--fg);border-radius:7px;padding:9px 10px;font-size:14px;font-family:inherit;width:100%}
 .field textarea{resize:vertical;min-height:60px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field-error{font-size:11.5px;color:var(--danger);margin-top:-1px}
+.field input[aria-invalid="true"],.field select[aria-invalid="true"]{border-color:var(--danger)}
+.field .req{color:var(--danger);margin-left:2px}
 @media (max-width:420px){.row2{grid-template-columns:1fr}}
 
 .hist{margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
@@ -236,7 +240,7 @@ svg text{font-family:var(--font-body)}
   </div>
   <div class="settings-row">
     Plazo administrativo estimado (para el semáforo de urgencia):
-    <input type="number" id="plazoDias" min="1" step="1"> días hábiles desde fecha de inicio
+    <input type="number" id="plazoDias" min="1" max="3650" step="1"> días hábiles desde fecha de inicio
   </div>
   <div class="exp-list" id="expList"></div>
 </section>
@@ -311,7 +315,18 @@ svg text{font-family:var(--font-body)}
   var DEMO_KEY = "cartas_intencion_demo_descartada_v1";
 
   // Feriados nacionales (+ Güemes, 17/6, feriado en Salta) 2025-2026.
-  // Revisar cada año: el gobierno confirma los feriados trasladables por decreto.
+  //
+  // IMPORTANTE: esta tabla tiene fecha de vencimiento. Los feriados
+  // trasladables y los puentes turísticos los fija el gobierno por decreto
+  // cada año, así que no se pueden calcular: hay que cargarlos a mano.
+  //
+  // El código ya NO asume que un año sin cargar no tiene feriados. Cuando un
+  // vencimiento cae más allá del último año cargado, el plazo se marca como
+  // estimado (con ~) en vez de darse por exacto. Antes, un expediente que
+  // vencía en 2027 se calculaba como si 2027 no tuviera ningún feriado, lo
+  // que adelantaba la fecha y disparaba urgencias falsas sin avisar.
+  //
+  // Para extender: agregá el año al array y listo, el aviso desaparece solo.
   var FERIADOS = [
     "2025-01-01","2025-03-03","2025-03-04","2025-03-24","2025-04-02","2025-04-18",
     "2025-05-01","2025-05-25","2025-06-17","2025-06-20","2025-07-09","2025-08-17",
@@ -320,6 +335,13 @@ svg text{font-family:var(--font-body)}
     "2026-05-01","2026-05-25","2026-06-17","2026-06-20","2026-07-09","2026-08-17",
     "2026-10-12","2026-11-20","2026-12-08","2026-12-25"
   ];
+
+  // Último año cubierto por la tabla, derivado de los datos: no hay que
+  // acordarse de actualizar una constante aparte al agregar un año.
+  var FERIADOS_HASTA_ANIO = FERIADOS.reduce(function(max, f){
+    var a = parseInt(f.slice(0,4), 10);
+    return a > max ? a : max;
+  }, 0);
 
   function esc(s){
     return String(s==null?"":s).replace(/[&<>"']/g, function(c){
@@ -336,11 +358,21 @@ svg text{font-family:var(--font-body)}
     return dd+"/"+mo+"/"+ahora.getFullYear()+" "+hh+":"+mm;
   }
 
+  // Estricta a propósito. La versión anterior aceptaba "31/02/2026" y devolvía
+  // el 3 de marzo sin avisar, y "99/99/9999" daba el año 10007. Como
+  // fecha_inicio es la entrada de la que depende TODO el semáforo, una fecha
+  // corrida en silencio es un plazo mal calculado en silencio.
   function parseFechaLocal(ddmmaaaa){
-    var p = String(ddmmaaaa||"").split("/");
-    if(p.length!==3) return null;
-    var d = new Date(parseInt(p[2],10), parseInt(p[1],10)-1, parseInt(p[0],10));
-    return isNaN(d.getTime()) ? null : d;
+    var txt = String(ddmmaaaa||"").trim();
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(txt);
+    if(!m) return null;
+    var dia = parseInt(m[1],10), mes = parseInt(m[2],10), anio = parseInt(m[3],10);
+    if(mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+    if(anio < 1900 || anio > 2200) return null;
+    var d = new Date(anio, mes-1, dia);
+    // Si el Date se corrió (31/02 -> 03/03), los componentes no coinciden.
+    if(d.getFullYear()!==anio || d.getMonth()!==mes-1 || d.getDate()!==dia) return null;
+    return d;
   }
 
   function fechaISO(d){
@@ -355,14 +387,6 @@ svg text{font-family:var(--font-body)}
     return h;
   }
 
-  function diasDesde(ddmmaaaa){
-    var d = parseFechaLocal(ddmmaaaa);
-    if(!d) return null;
-    var hoy = hoyLocal();
-    d.setHours(0,0,0,0);
-    return Math.round((hoy-d)/86400000);
-  }
-
   function uid(){ return "exp_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
   // ---- Semáforo: plazo administrativo estimado, contado en días hábiles ----
@@ -370,10 +394,15 @@ svg text{font-family:var(--font-body)}
   function esFeriado(f){ return FERIADOS.indexOf(fechaISO(f))!==-1; }
   function esHabil(f){ return !esFinDeSemana(f) && !esFeriado(f); }
 
+  // Tope duro: el input de plazo no tiene max, así que un 999999999 pegado de
+  // casualidad hacía ~1.450.000.000 iteraciones y congelaba la pestaña.
+  var PLAZO_MAX_DIAS = 3650; // 10 años hábiles, de sobra para un trámite
+
   function calcularFechaFin(fechaInicioLocal, diasPlazo){
     var fecha = new Date(fechaInicioLocal.getTime());
     var contados = 0;
-    while(contados < diasPlazo){
+    var tope = Math.min(diasPlazo, PLAZO_MAX_DIAS);
+    while(contados < tope){
       fecha.setDate(fecha.getDate()+1);
       if(esHabil(fecha)) contados++;
     }
@@ -393,9 +422,13 @@ svg text{font-family:var(--font-body)}
     var hoy = hoyLocal();
     var fechaFin = calcularFechaFin(inicio, diasPlazo);
     var vencido = fechaFin < hoy;
+    // Si el cálculo pisa años sin feriados cargados, el resultado es una
+    // estimación optimista (faltan feriados = la fecha sale antes de tiempo).
+    var estimado = fechaFin.getFullYear() > FERIADOS_HASTA_ANIO;
     return {
       fechaFin: fechaFin,
       vencido: vencido,
+      estimado: estimado,
       venceHoy: fechaFin.getTime()===hoy.getTime(),
       diasRestantes: vencido ? 0 : diasHabilesEntre(hoy, fechaFin),
       diasVencido: vencido ? diasHabilesEntre(fechaFin, hoy) : 0
@@ -410,9 +443,18 @@ svg text{font-family:var(--font-body)}
   }
 
   function textoPlazo(plazo){
-    if(plazo.vencido) return plazo.diasVencido>0 ? "Vencido hace "+plazo.diasVencido+" d háb." : "Vencido";
-    if(plazo.venceHoy) return "Vence hoy";
-    return plazo.diasRestantes+" d háb.";
+    var t;
+    if(plazo.vencido) t = plazo.diasVencido>0 ? "Vencido hace "+plazo.diasVencido+" d háb." : "Vencido";
+    else if(plazo.venceHoy) t = "Vence hoy";
+    else t = plazo.diasRestantes+" d háb.";
+    return plazo.estimado ? "~"+t : t;
+  }
+
+  function avisoEstimado(plazo){
+    if(!plazo.estimado) return "";
+    return "Estimado: el vencimiento cae en "+plazo.fechaFin.getFullYear()+
+           " y los feriados solo están cargados hasta "+FERIADOS_HASTA_ANIO+
+           ". Faltan feriados, así que la fecha real es igual o posterior a esta.";
   }
 
   function urgenciaDe(e, plazoDias){
@@ -420,7 +462,8 @@ svg text{font-family:var(--font-body)}
     var plazo = calcularPlazo(e.fecha_inicio, plazoDias);
     if(!plazo) return null;
     var sem = obtenerSemaforo(plazo);
-    return {color:sem.color, orden:sem.orden, texto:textoPlazo(plazo)};
+    return {color:sem.color, orden:sem.orden, texto:textoPlazo(plazo),
+            estimado:plazo.estimado, aviso:avisoEstimado(plazo)};
   }
 
   // ---- Datos de ejemplo ----
@@ -746,7 +789,12 @@ svg text{font-family:var(--font-body)}
   plazoInput.value = state.plazoDias;
   plazoInput.addEventListener("change", function(){
     var v = parseInt(this.value,10);
-    if(v>0){ state.plazoDias=v; savePlazo(v); renderList(); if(!viewDash.hidden) renderDashboard(); }
+    // Antes un valor inválido se descartaba en silencio y el input quedaba
+    // mostrando un número que la app no estaba usando.
+    if(!(v>0)){ this.value = state.plazoDias; return; }
+    if(v > PLAZO_MAX_DIAS) v = PLAZO_MAX_DIAS;
+    this.value = v;
+    state.plazoDias=v; savePlazo(v); renderList(); if(!viewDash.hidden) renderDashboard();
   });
 
   function expedientesFiltrados(){
@@ -796,7 +844,7 @@ svg text{font-family:var(--font-body)}
           (sub?'<div class="exp-card-sub">'+esc(sub)+'</div>':'')+
         '</div>'+
         '<div class="exp-card-aside">'+
-          (urg?'<span class="urg urg-'+urg.color+'">'+esc(urg.texto)+'</span>':'')+
+          (urg?'<span class="urg urg-'+urg.color+'"'+(urg.aviso?' title="'+esc(urg.aviso)+'"':'')+'>'+esc(urg.texto)+'</span>':'')+
           '<span class="badge '+(SIT_BADGE[e.situacion]||"b-idle")+'">'+esc(labelSituacion(e.situacion))+'</span>'+
         '</div>'+
         '</button>';
@@ -969,7 +1017,8 @@ svg text{font-family:var(--font-body)}
           '<div class="view-exp">'+esc(e.nro_expediente||"s/n")+'</div></div>'+
         '<span class="badge '+(SIT_BADGE[e.situacion]||"b-idle")+'">'+esc(labelSituacion(e.situacion))+'</span>'+
       '</div>'+
-      (urg?'<div class="view-urg"><span class="urg urg-'+urg.color+'">'+esc(urg.texto)+'</span></div>':'')+
+      (urg?'<div class="view-urg"><span class="urg urg-'+urg.color+'">'+esc(urg.texto)+'</span>'+
+           (urg.aviso?'<div class="urg-aviso">'+esc(urg.aviso)+'</div>':'')+'</div>':'')+
 
       '<div class="view-section"><h3>Expediente</h3>'+
         '<div class="view-grid">'+
@@ -1012,8 +1061,8 @@ svg text{font-family:var(--font-body)}
       '<div class="modal-head"><h2>'+(isNew?"Nuevo expediente":"Editar expediente")+'</h2><button class="x-close" id="xClose">&times;</button></div>'+
       '<form id="expForm">'+
         field("nro_expediente","Nro. de expediente","text",e,"363-65027/2026-0",true)+
-        field("nombre_empresa","Nombre de la empresa","text",e,"Premoldeados del Norte S.A.")+
-        '<div class="row2">'+field("fecha_inicio","Fecha de inicio","text",e,"dd/mm/aaaa")+selectField("parque_industrial","Parque industrial",PARQUES,e)+'</div>'+
+        field("nombre_empresa","Nombre de la empresa","text",e,"Premoldeados del Norte S.A.",false,true)+
+        '<div class="row2">'+field("fecha_inicio","Fecha de inicio","text",e,"dd/mm/aaaa",false,true)+selectField("parque_industrial","Parque industrial",PARQUES,e)+'</div>'+
         '<div class="row2">'+field("superficie_solicitada_m2","Superficie solicitada (m²)","number",e)+selectField("rubro","Rubro",RUBROS,e)+'</div>'+
         selectField("situacion","Situación",SITUACIONES.map(function(s){return s.id;}),e,SITUACIONES)+
         field("actividad_empresa","Actividad de la empresa","text",e,"Fábrica de premoldeados de hormigón")+
@@ -1034,10 +1083,45 @@ svg text{font-family:var(--font-body)}
     if(cancelBtn) cancelBtn.addEventListener("click", function(){ state.modalMode="view"; renderModal(); });
   }
 
-  function field(name,label,type,e,placeholder,mono){
+  function field(name,label,type,e,placeholder,mono,requerido){
     var val = e ? (e[name]==null?"":e[name]) : "";
-    return '<div class="field"><label for="f_'+name+'">'+esc(label)+'</label>'+
-      '<input class="'+(mono?"mono":"")+'" id="f_'+name+'" name="'+name+'" type="'+type+'" value="'+esc(val)+'" placeholder="'+esc(placeholder||"")+'"></div>';
+    return '<div class="field" data-campo="'+name+'"><label for="f_'+name+'">'+esc(label)+
+      (requerido?'<span class="req" aria-hidden="true">*</span>':'')+'</label>'+
+      '<input class="'+(mono?"mono":"")+'" id="f_'+name+'" name="'+name+'" type="'+type+'"'+
+      (requerido?' aria-required="true"':'')+
+      ' value="'+esc(val)+'" placeholder="'+esc(placeholder||"")+'"></div>';
+  }
+
+  // Validación en un solo lugar, para que el formulario y cualquier dato que
+  // entre por sync se midan con la misma vara.
+  function validarExpediente(v){
+    var errores = {};
+    if(!v.nombre_empresa) errores.nombre_empresa = "Poné el nombre de la empresa.";
+    if(!v.fecha_inicio) errores.fecha_inicio = "Poné la fecha de inicio: sin ella no hay semáforo de plazo.";
+    else if(!parseFechaLocal(v.fecha_inicio)) errores.fecha_inicio = "Fecha inválida. Usá dd/mm/aaaa (por ejemplo 09/10/2026).";
+    if(v.superficie_solicitada_m2 !== "" && !(Number(v.superficie_solicitada_m2) >= 0)){
+      errores.superficie_solicitada_m2 = "La superficie tiene que ser un número.";
+    }
+    return errores;
+  }
+
+  function mostrarErrores(errores){
+    modal.querySelectorAll(".field-error").forEach(function(n){ n.remove(); });
+    modal.querySelectorAll('[aria-invalid="true"]').forEach(function(n){ n.removeAttribute("aria-invalid"); });
+    var primero = null;
+    Object.keys(errores).forEach(function(campo){
+      var cont = modal.querySelector('[data-campo="'+campo+'"]');
+      var input = document.getElementById("f_"+campo);
+      if(input) input.setAttribute("aria-invalid","true");
+      if(cont){
+        var nota = document.createElement("div");
+        nota.className = "field-error";
+        nota.textContent = errores[campo];
+        cont.appendChild(nota);
+      }
+      if(!primero) primero = input;
+    });
+    if(primero){ primero.focus(); if(primero.scrollIntoView) primero.scrollIntoView({block:"center"}); }
   }
   function selectField(name,label,options,e,labelMap){
     var current = e ? e[name] : (name==="situacion" ? "Sin_tratamiento" : "");
@@ -1069,6 +1153,18 @@ svg text{font-family:var(--font-body)}
 
     var situacionAnterior = existing ? existing.situacion : null;
     var situacionNueva = g("situacion") || "Sin_tratamiento";
+
+    // Validar ANTES de mutar nada: antes el formulario se podía enviar
+    // completamente vacío y creaba un expediente en blanco, y una fecha
+    // inválida se guardaba corrida o dejaba el semáforo mudo.
+    var candidato = {
+      nombre_empresa: g("nombre_empresa").trim(),
+      fecha_inicio: g("fecha_inicio").trim(),
+      superficie_solicitada_m2: g("superficie_solicitada_m2").trim()
+    };
+    var errores = validarExpediente(candidato);
+    if(Object.keys(errores).length){ mostrarErrores(errores); return; }
+
     var exp = existing || {id:uid(), ejemplo:false, intervenciones:[]};
 
     exp.nro_expediente = g("nro_expediente").trim();
