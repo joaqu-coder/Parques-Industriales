@@ -220,13 +220,13 @@ svg text{font-family:var(--font-body)}
   </div>
 </div>
 
-<div class="tabs">
-  <button class="tab" id="tabList">Listado</button>
-  <button class="tab" id="tabDash">Dashboard</button>
+<div class="tabs" role="tablist" aria-label="Vistas">
+  <button class="tab" id="tabList" role="tab" aria-selected="true" aria-controls="viewList">Listado</button>
+  <button class="tab" id="tabDash" role="tab" aria-selected="false" aria-controls="viewDash">Dashboard</button>
 </div>
 
 <!-- ===== VISTA LISTADO ===== -->
-<section class="view" id="viewList">
+<section class="view" id="viewList" role="tabpanel" aria-labelledby="tabList">
   <div class="toolbar">
     <select id="filterParque"><option value="">Todos los parques</option></select>
     <select id="filterRubro"><option value="">Todos los rubros</option></select>
@@ -246,7 +246,7 @@ svg text{font-family:var(--font-body)}
 </section>
 
 <!-- ===== VISTA DASHBOARD ===== -->
-<section class="view" id="viewDash" hidden>
+<section class="view" id="viewDash" role="tabpanel" aria-labelledby="tabDash" hidden>
 
   <div class="dash-section">
     <div class="dash-section-head">
@@ -295,7 +295,7 @@ svg text{font-family:var(--font-body)}
 
 </section>
 
-<div class="veil" id="veil" hidden><div class="modal" id="modal"></div></div>
+<div class="veil" id="veil" hidden><div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Ficha de expediente"></div></div>
 
 <script>
 (function(){
@@ -513,7 +513,7 @@ svg text{font-family:var(--font-body)}
        actividad_empresa:"Planta de acopio y secado de granos", situacion:"Adjudicada",
        representante_nombre:"Jorge Villagrán", contacto_tel:"", contacto_mail:"",
        fecha_ultimo_movimiento:"20/01/2026",
-       intervenciones:[{hora:"20/01/2026 10:15", texto:"Cambio de situación: En_tratamiento → Adjudicada", tipo:"sistema"}]},
+       intervenciones:[{hora:"20/01/2026 10:15", texto:"Cambio de situación: En tratamiento → Adjudicada", tipo:"sistema"}]},
       {id:uid(), ejemplo:true, nro_expediente:"363-58213/2025-0", fecha_inicio:"05/03/2025",
        nombre_empresa:"Metalúrgica Ortiz Hnos.",
        parque_industrial:"Salta", rubro:"Metalmecánica", superficie_solicitada_m2:950,
@@ -766,6 +766,22 @@ svg text{font-family:var(--font-body)}
     }
   }
 
+  // Los datos solo se bajaban al abrir la app, asi que los cambios hechos en
+  // otro dispositivo no aparecian hasta recargar entera — mientras el cartel
+  // decia "Sincronizado". Ahora tambien se refresca al volver a la pestaña.
+  var ultimoRefresco = Date.now();
+  var REFRESCO_MIN_MS = 30000;
+  function refrescarSiCorresponde(){
+    if(document.hidden) return;
+    if(!veil.hidden) return;                 // modal abierto: no le muevas el piso
+    if(haySyncPendiente() || state.esDemo) return;
+    if(Date.now() - ultimoRefresco < REFRESCO_MIN_MS) return;
+    ultimoRefresco = Date.now();
+    bajarCambiosIniciales();
+  }
+  document.addEventListener("visibilitychange", refrescarSiCorresponde);
+  window.addEventListener("focus", refrescarSiCorresponde);
+
   function reintentarAhora(){
     errorPermanente = false;
     fallosSeguidos = 0;
@@ -788,16 +804,26 @@ svg text{font-family:var(--font-body)}
   // ---- Tabs / routing ----
   var tabList = document.getElementById("tabList"), tabDash = document.getElementById("tabDash");
   var viewList = document.getElementById("viewList"), viewDash = document.getElementById("viewDash");
-  function showView(name){
+  function showView(name, desdeHash){
     var isDash = name==="dashboard";
     viewList.hidden = isDash; viewDash.hidden = !isDash;
     tabList.classList.toggle("active", !isDash);
     tabDash.classList.toggle("active", isDash);
+    tabList.setAttribute("aria-selected", String(!isDash));
+    tabDash.setAttribute("aria-selected", String(isDash));
     if(isDash) renderDashboard();
-    location.hash = isDash ? "#dashboard" : "";
+    if(desdeHash) return; // vino del hash: no lo reescribas, sería un bucle
+    var destino = isDash ? "#dashboard" : "#listado";
+    if(location.hash !== destino) location.hash = destino;
   }
   tabList.addEventListener("click", function(){ showView("list"); });
   tabDash.addEventListener("click", function(){ showView("dashboard"); });
+
+  // Sin esto, el botón "atrás" del navegador cambiaba la URL y dejaba la
+  // vista como estaba.
+  window.addEventListener("hashchange", function(){
+    showView(location.hash === "#dashboard" ? "dashboard" : "list", true);
+  });
 
   // ---- Filtros ----
   var selParque = document.getElementById("filterParque");
@@ -1033,12 +1059,48 @@ svg text{font-family:var(--font-body)}
   document.getElementById("btnNew").addEventListener("click", function(){ openModal(null); });
   veil.addEventListener("click", function(ev){ if(ev.target===veil) closeModal(); });
 
+  var focoPrevio = null;
+
   function openModal(id){
+    focoPrevio = document.activeElement;
     state.editingId = id;
     state.modalMode = id ? "view" : "edit";
     veil.hidden = false;
+    // El fondo scrolleaba detrás del modal, sobre todo en iOS.
+    document.body.style.overflow = "hidden";
     renderModal();
+    enfocarPrimero();
   }
+
+  function focusables(){
+    return Array.prototype.filter.call(
+      modal.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])'),
+      function(el){ return !el.disabled && el.offsetParent !== null || el.tagName === "BUTTON"; }
+    );
+  }
+  function enfocarPrimero(){
+    var f = focusables();
+    // El primero suele ser la X de cerrar; preferimos el primer campo real.
+    var campo = modal.querySelector("input,select,textarea");
+    var destino = campo || f[0];
+    if(destino && destino.focus) destino.focus();
+  }
+
+  // Trampa de foco: sin esto, tabular dentro de un diálogo modal se escapaba
+  // a la página de atrás, que para un lector de pantalla no existe.
+  modal.addEventListener("keydown", function(ev){
+    if(ev.key !== "Tab") return;
+    var f = focusables();
+    if(!f.length) return;
+    var primero = f[0], ultimo = f[f.length-1];
+    if(ev.shiftKey && document.activeElement === primero){ ev.preventDefault(); ultimo.focus(); }
+    else if(!ev.shiftKey && document.activeElement === ultimo){ ev.preventDefault(); primero.focus(); }
+  });
+
+  // Escape cierra, que es lo que todo el mundo espera de un modal.
+  document.addEventListener("keydown", function(ev){
+    if(ev.key === "Escape" && !veil.hidden) closeModal();
+  });
 
   function renderModal(){
     var id = state.editingId;
@@ -1091,7 +1153,7 @@ svg text{font-family:var(--font-body)}
       '</div>';
 
     document.getElementById("xClose").addEventListener("click", closeModal);
-    document.getElementById("btnEdit").addEventListener("click", function(){ state.modalMode="edit"; renderModal(); });
+    document.getElementById("btnEdit").addEventListener("click", function(){ state.modalMode="edit"; renderModal(); enfocarPrimero(); });
     document.getElementById("btnDelete").addEventListener("click", onDelete);
   }
 
@@ -1185,7 +1247,14 @@ svg text{font-family:var(--font-body)}
       : '<div class="hist-empty">Sin notas aún.</div>';
     return '<div class="hist"><h3>Historial ('+notas.length+')</h3>'+body+'</div>';
   }
-  function closeModal(){ veil.hidden = true; state.editingId = null; state.modalMode = null; }
+  function closeModal(){
+    veil.hidden = true;
+    state.editingId = null;
+    state.modalMode = null;
+    document.body.style.overflow = "";
+    if(focoPrevio && focoPrevio.focus) focoPrevio.focus();
+    focoPrevio = null;
+  }
 
   function onSave(ev){
     ev.preventDefault();
@@ -1268,7 +1337,7 @@ svg text{font-family:var(--font-body)}
   applyThemeButton();
 
   renderList();
-  if(location.hash === "#dashboard") showView("dashboard"); else showView("list");
+  showView(location.hash === "#dashboard" ? "dashboard" : "list", true);
   bajarCambiosIniciales();
 
   // Ruta absoluta a propósito: con not_found_handling = single-page-application
