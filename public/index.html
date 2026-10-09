@@ -70,6 +70,7 @@ svg text{font-family:var(--font-body)}
 .exp-card-sub{font-size:11.5px;color:var(--muted);margin-top:3px}
 .example-tag{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px dashed var(--accent);border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap}
 .empty-state{padding:30px 14px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.aviso-demo{font-size:12px;color:var(--muted);background:var(--surface-2);border:1px dashed var(--border);border-radius:8px;padding:9px 11px;margin-bottom:8px;line-height:1.45}
 
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:6px;padding:3px 8px;white-space:nowrap}
 .badge.b-ok{background:var(--ok-bg);color:var(--ok)}
@@ -285,6 +286,7 @@ svg text{font-family:var(--font-body)}
   ];
   var STORAGE_KEY = "cartas_intencion_parques_v2";
   var PLAZO_KEY = "cartas_intencion_plazo_v1";
+  var DEMO_KEY = "cartas_intencion_demo_descartada_v1";
 
   // Feriados nacionales (+ Güemes, 17/6, feriado en Salta) 2025-2026.
   // Revisar cada año: el gobierno confirma los feriados trasladables por decreto.
@@ -438,16 +440,42 @@ svg text{font-family:var(--font-body)}
     ];
   }
 
+  // Una lista vacía es un dato legítimo, no "falta inicializar". Antes
+  // `data.length` era la condición, así que `[]` caía en ejemplos(): borrar el
+  // último expediente hacía reaparecer los 5 de muestra, y el siguiente
+  // guardado los subía al repo como si fueran reales.
+  //
+  // Ahora hay un estado "demo" explícito: los ejemplos se muestran pero NO se
+  // persisten ni se suben. El primer guardado reemplaza la demo por los datos
+  // reales; un borrado la descarta.
   function load(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return ejemplos();
-      var data = JSON.parse(raw);
-      return (Array.isArray(data) && data.length) ? data : ejemplos();
-    }catch(e){ return ejemplos(); }
+      if(raw != null){
+        var data = JSON.parse(raw);
+        if(Array.isArray(data)) return {expedientes:data, esDemo:false};
+      }
+      if(localStorage.getItem(DEMO_KEY) === "1") return {expedientes:[], esDemo:false};
+    }catch(e){ /* storage bloqueado o JSON roto: cae a la demo */ }
+    return {expedientes:ejemplos(), esDemo:true};
   }
-  function save(){
+
+  function persistirLocal(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes)); }catch(e){}
+  }
+
+  // Salir de la demo: los ejemplos que el usuario no tocó se van, y queda
+  // marcado para que no vuelvan en la próxima carga.
+  function descartarDemo(conservarId){
+    state.expedientes = state.expedientes.filter(function(x){
+      return !x.ejemplo || x.id === conservarId;
+    });
+    state.esDemo = false;
+    try{ localStorage.setItem(DEMO_KEY, "1"); }catch(e){}
+  }
+
+  function save(){
+    persistirLocal();
     marcarPendiente();
   }
   function loadPlazo(){
@@ -480,6 +508,9 @@ svg text{font-family:var(--font-body)}
   }
 
   function marcarPendiente(){
+    // La demo no se sube. Sin esto, cambiar el plazo o editar un ejemplo
+    // posteaba los 5 expedientes de muestra al repo.
+    if(state && state.esDemo) return;
     try{ localStorage.setItem(SYNC_PENDING_KEY, "1"); }catch(e){}
     errorPermanente = false; // hay datos nuevos: vale volver a intentar
     setSyncStatus("pendiente");
@@ -552,6 +583,7 @@ svg text{font-family:var(--font-body)}
 
   async function subirCambios(){
     if(syncEnProgreso || !haySyncPendiente() || errorPermanente) return;
+    if(state && state.esDemo) return; // los ejemplos no se suben jamás
     syncEnProgreso = true;
     setSyncStatus("subiendo");
     try{
@@ -603,10 +635,35 @@ svg text{font-family:var(--font-body)}
       var resp = await fetch("/api/sync");
       if(!resp.ok) throw new Error(await leerError(resp));
       var datos = await resp.json();
-      if(datos && Array.isArray(datos.expedientes) && datos.expedientes.length){
+      if(!datos || !Array.isArray(datos.expedientes)){
+        throw new Error("El servidor devolvió datos con una forma inesperada.");
+      }
+
+      // plazoDias se adopta por su cuenta. Antes estaba anidado dentro del if
+      // de expedientes, así que cambiar solo el plazo nunca llegaba a otro
+      // dispositivo.
+      var cambio = false;
+      var plazoRemoto = Number(datos.plazoDias);
+      if(Number.isFinite(plazoRemoto) && plazoRemoto > 0 && plazoRemoto !== state.plazoDias){
+        state.plazoDias = plazoRemoto;
+        plazoInput.value = state.plazoDias;
+        try{ localStorage.setItem(PLAZO_KEY, String(state.plazoDias)); }catch(e){}
+        cambio = true;
+      }
+
+      // Si datos.json existe, el repo es la fuente de verdad — incluso con
+      // cero expedientes. Antes un repo vacío se ignoraba y la demo local
+      // sobrevivía para después subirse.
+      var repoInicializado = !(datos._meta && datos._meta.existe === false);
+      if(repoInicializado){
         state.expedientes = datos.expedientes;
-        if(datos.plazoDias){ state.plazoDias = datos.plazoDias; plazoInput.value = state.plazoDias; }
-        try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes)); localStorage.setItem(PLAZO_KEY, String(state.plazoDias)); }catch(e){}
+        state.esDemo = false;
+        try{ localStorage.setItem(DEMO_KEY, "1"); }catch(e){}
+        persistirLocal();
+        cambio = true;
+      }
+
+      if(cambio){
         renderList();
         if(!viewDash.hidden) renderDashboard();
       }
@@ -636,7 +693,8 @@ svg text{font-family:var(--font-body)}
     });
   }
 
-  var state = { expedientes: load(), editingId: null, modalMode: null, filterParque:"", filterRubro:"", filterSituacion:"", search:"", plazoDias: loadPlazo() };
+  var inicial = load();
+  var state = { expedientes: inicial.expedientes, esDemo: inicial.esDemo, editingId: null, modalMode: null, filterParque:"", filterRubro:"", filterSituacion:"", search:"", plazoDias: loadPlazo() };
 
   // ---- Tabs / routing ----
   var tabList = document.getElementById("tabList"), tabDash = document.getElementById("tabDash");
@@ -685,6 +743,12 @@ svg text{font-family:var(--font-body)}
   // ---- Listado (tarjetas: frente = nro + empresa, el resto al abrir) ----
   function renderList(){
     var cont = document.getElementById("expList");
+    // El modo demo tiene que ser legible, no adivinable: estos 5 expedientes
+    // no están guardados en ningún lado.
+    var avisoDemo = state.esDemo
+      ? '<div class="aviso-demo">Estos expedientes son de <strong>muestra</strong>: no están guardados ni sincronizados. '+
+        'En cuanto cargues o edites uno, la muestra se reemplaza por tus datos reales.</div>'
+      : '';
     var filtrados = expedientesFiltrados().map(function(e){
       return {e:e, urg: urgenciaDe(e, state.plazoDias)};
     });
@@ -693,11 +757,14 @@ svg text{font-family:var(--font-body)}
       return oa - ob;
     });
     if(!filtrados.length){
-      cont.innerHTML = '<div class="empty-state">Sin expedientes que coincidan con el filtro.</div>';
+      var vacio = state.expedientes.length
+        ? "Sin expedientes que coincidan con el filtro."
+        : "Todavía no hay expedientes cargados. Tocá « + Nuevo expediente » para empezar.";
+      cont.innerHTML = avisoDemo + '<div class="empty-state">'+esc(vacio)+'</div>';
       return;
     }
     var SIT_BADGE = {Adjudicada:"b-ok", En_tratamiento:"b-warn", Sin_tratamiento:"b-idle"};
-    cont.innerHTML = filtrados.map(function(x){
+    cont.innerHTML = avisoDemo + filtrados.map(function(x){
       var e = x.e, urg = x.urg;
       var sub = [e.parque_industrial, e.rubro].filter(Boolean).join(" · ");
       return '<button class="exp-card" data-open="'+e.id+'">'+
@@ -1005,6 +1072,8 @@ svg text{font-family:var(--font-body)}
     if(huboCambioEstado || nota || isNew) exp.fecha_ultimo_movimiento = ahora;
 
     if(isNew) state.expedientes.push(exp);
+    exp.ejemplo = false; // lo que el usuario guarda es dato real, no muestra
+    if(state.esDemo) descartarDemo(exp.id);
     save();
     closeModal();
     renderList();
@@ -1014,6 +1083,9 @@ svg text{font-family:var(--font-body)}
   function onDelete(){
     if(!state.editingId) return;
     state.expedientes = state.expedientes.filter(function(x){return x.id!==state.editingId;});
+    // Borrar un ejemplo descarta la demo completa: no tiene sentido quedarse
+    // con 4 de 5 expedientes de muestra.
+    if(state.esDemo) descartarDemo(null);
     save(); closeModal(); renderList();
     if(!viewDash.hidden) renderDashboard();
   }

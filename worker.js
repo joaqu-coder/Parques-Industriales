@@ -131,7 +131,13 @@ export default {
         try {
           const rama = await resolverRama(env.GITHUB_TOKEN, env);
           const { datos, existe } = await githubGetFile(env.GITHUB_TOKEN, rama);
-          return json(existe ? datos : DATOS_VACIOS);
+          const cuerpo = existe ? datos : DATOS_VACIOS;
+          // _meta no se escribe nunca en datos.json; solo viaja en la
+          // respuesta. El cliente necesita poder distinguir "el repo tiene
+          // cero expedientes" de "datos.json todavía no existe": si colapsa
+          // los dos casos, no puede saber si una lista vacía es un dato real
+          // o falta de inicialización.
+          return json(Object.assign({}, cuerpo, { _meta: { existe, rama } }));
         } catch (err) {
           return json({ error: "No se pudo leer datos.json", detalle: String(err.message || err) }, 502);
         }
