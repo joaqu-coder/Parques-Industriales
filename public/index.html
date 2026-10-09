@@ -1,8 +1,28 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<!-- Sin este viewport el navegador movil renderiza a 980px y hace zoom out:
+     todas las media queries de 420px/640px/860px de abajo quedaban muertas y
+     la UI mobile-first no se usaba nunca. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cartas de Intención — Parques Industriales</title>
+<meta name="description" content="Seguimiento de cartas de intención de los parques industriales de Salta.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f1ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cartas EGPAIS">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <script>
 (function(){
-  var saved = localStorage.getItem("cartas_intencion_theme_v1");
-  if(saved==="dark") document.documentElement.setAttribute("data-theme","dark");
+  try{
+    var saved = localStorage.getItem("cartas_intencion_theme_v1");
+    if(saved==="dark") document.documentElement.setAttribute("data-theme","dark");
+  }catch(e){ /* storage bloqueado: queda el tema claro por defecto */ }
 })();
 </script>
 <style>
@@ -171,6 +191,8 @@ svg text{font-family:var(--font-body)}
 .alerta button{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;
   padding:5px 9px;font-size:12px;font-weight:600}
 </style>
+</head>
+<body>
 
 <div class="topbar">
   <div>
@@ -1110,8 +1132,16 @@ svg text{font-family:var(--font-body)}
   if(location.hash === "#dashboard") showView("dashboard"); else showView("list");
   bajarCambiosIniciales();
 
+  // Ruta absoluta a propósito: con not_found_handling = single-page-application
+  // cualquier path devuelve index.html, así que 'sw.js' relativo resuelto desde
+  // /algo/otro pedía /algo/sw.js y recibía HTML — el registro fallaba por MIME.
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
+    navigator.serviceWorker.register('/sw.js', {scope:'/'}).catch(function(err){
+      console.warn("[sw] no se pudo registrar:", err && err.message);
+    });
   }
 })();
 </script>
+
+</body>
+</html>
