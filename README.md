@@ -80,6 +80,40 @@ este repo nunca tuvo. Ver la trampa 6.
    **cada guardado de un expediente redeploya el Worker**. El commit lleva
    `[skip ci]`, que ayuda si la plataforma lo respeta, pero la solución segura
    es apuntar `GITHUB_RAMA` a una rama que Builds no observe.
+8. **Subí `VERSION` en `public/sw.js` cuando cambies archivos de `public/`.**
+   El nombre de la caché depende de ella y `activate` borra las versiones
+   anteriores. Si no la subís, los estáticos viejos siguen sirviéndose.
+9. **El 6º argumento de `field()` es `mono`, no `required`.** Un `true` ahí no
+   marca nada como obligatorio; el 7º sí. Ya pasó una vez.
+10. **`JSON.stringify` de un nodo DOM es `{}`.** Un assert que compare dos
+    elementos con `JSON.stringify` los da siempre por iguales y pasa en verde
+    contra código roto. En los tests, para nodos se usa `checkMismo()`
+    (identidad). Esto hizo pasar dos pruebas que no probaban nada.
+
+## Desarrollo
+
+```bash
+npm install   # solo jsdom, para los tests
+npm test      # 7 suites; sale != 0 si algo falla
+npm run deploy
+```
+
+Las suites cargan `public/index.html`, `worker.js` y `public/sw.js` tal cual
+se despliegan — no hay mocks del código propio. Ver `test/README.md`.
+
+## El semáforo de plazos
+
+El vencimiento se calcula en **días hábiles** desde `fecha_inicio`,
+descontando fines de semana y la tabla `FERIADOS` del `index.html`.
+
+**Esa tabla hay que mantenerla a mano cada año.** Los feriados trasladables y
+los puentes turísticos los fija el gobierno por decreto, no se pueden
+calcular. Cubre 2025-2026.
+
+Cuando un vencimiento cae más allá del último año cargado, el plazo se muestra
+con `~` y la app explica por qué al pasar el mouse. No inventa feriados: avisa
+que está estimando. Para extender, agregá el año al array y el aviso
+desaparece solo (`FERIADOS_HASTA_ANIO` se deriva de los propios datos).
 
 ## Forma de los datos (`datos.json`)
 
@@ -119,6 +153,6 @@ subida después). Si la subida falla:
    la *forma* de lo que se escribe (rechaza lo que no sea `{expedientes: [...]}`),
    así que no se puede meter basura arbitraria, pero sí datos válidos de otra
    persona. Pendiente de decisión.
-3. **Los datos solo se bajan al abrir la app.** No hay poll ni refresh al volver
-   a la pestaña: los cambios hechos en otro dispositivo aparecen recién al
-   recargar.
+3. **No hay poll continuo.** Los datos se bajan al abrir la app y al volver a
+   la pestaña (con un piso de 30s). Un cambio hecho en otro dispositivo
+   mientras tenés la pestaña abierta y en primer plano no aparece solo.

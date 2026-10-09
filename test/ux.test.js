@@ -117,6 +117,27 @@ console.log("\n=== Modal: dialogo, foco, Escape y scroll ===");
   checkMismo("el foco vuelve a donde estaba", d.activeElement, botonNuevo);
 }
 
+console.log("\n=== La trampa de foco ignora lo deshabilitado ===");
+{
+  const a=app(); await settle(); await a.avanzar(0);
+  const d=a.win.document, win=a.win;
+  const modal=d.getElementById("modal");
+  d.getElementById("btnNew").click(); await settle();
+
+  // Deshabilitar el ultimo foco real y comprobar que la trampa lo saltea.
+  const sel = 'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])';
+  const todos = Array.from(modal.querySelectorAll(sel));
+  const ultimoReal = todos[todos.length-1];
+  ultimoReal.disabled = true;
+  const esperado = todos.filter(el => !el.disabled && !el.hidden);
+  const nuevoUltimo = esperado[esperado.length-1];
+  nuevoUltimo.focus();
+  tecla(win, nuevoUltimo, "Tab"); await settle();
+  checkMismo("Tab salta al primero habilitado, no al deshabilitado",
+             d.activeElement, esperado[0]);
+  checkQue("el elemento deshabilitado no recibe foco", d.activeElement !== ultimoReal);
+}
+
 console.log("\n=== Modal de lectura tambien cierra con Escape ===");
 {
   const a=app(); await settle(); await a.avanzar(0);

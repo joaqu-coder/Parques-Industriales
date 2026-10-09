@@ -1073,9 +1073,12 @@ svg text{font-family:var(--font-body)}
   }
 
   function focusables(){
+    // Ojo con la precedencia: `!a && b || c` es `(!a && b) || c`. Una versión
+    // con ese encadenado dejaba pasar los botones deshabilitados y, donde
+    // offsetParent no está implementado, descartaba todos los campos.
     return Array.prototype.filter.call(
       modal.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])'),
-      function(el){ return !el.disabled && el.offsetParent !== null || el.tagName === "BUTTON"; }
+      function(el){ return !el.disabled && !el.hidden; }
     );
   }
   function enfocarPrimero(){
