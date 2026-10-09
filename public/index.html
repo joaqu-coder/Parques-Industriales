@@ -155,6 +155,20 @@ svg text{font-family:var(--font-body)}
 /* ---- Indicador de sincronización ---- */
 .sync-status{font-size:11.5px;color:var(--muted);white-space:nowrap}
 .sync-status.offline{color:var(--danger)}
+.sync-status.error{color:var(--danger);font-weight:600}
+
+/* Un error de sincronización tiene que verse, no esconderse en un texto de
+   11px. Esto es lo que faltaba: el sync estuvo roto y la app decía
+   "Sincronizado". */
+.alerta{background:var(--danger-bg);border:1px solid var(--danger);border-left-width:4px;
+  border-radius:8px;padding:11px 13px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start}
+.alerta[hidden]{display:none}
+.alerta-cuerpo{flex:1;min-width:0}
+.alerta-titulo{font-size:13px;font-weight:700;color:var(--danger)}
+.alerta-detalle{font-size:12px;color:var(--fg);margin-top:4px;line-height:1.45;word-break:break-word}
+.alerta-acciones{display:flex;gap:6px;flex:0 0 auto}
+.alerta button{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;
+  padding:5px 9px;font-size:12px;font-weight:600}
 </style>
 
 <div class="topbar">
@@ -163,9 +177,19 @@ svg text{font-family:var(--font-body)}
     <h1>Cartas de Intención — Parques Industriales</h1>
   </div>
   <div style="display:flex;align-items:center;gap:12px">
-    <span class="sync-status" id="syncStatus">☁️ Sincronizado</span>
+    <span class="sync-status" id="syncStatus" role="status" aria-live="polite">⏳ Cargando…</span>
     <button class="btn-theme" id="btnTheme" aria-label="Cambiar a modo oscuro">🌙</button>
     <button class="btn-new" id="btnNew">+ Nuevo expediente</button>
+  </div>
+</div>
+
+<div class="alerta" id="alertaSync" hidden>
+  <div class="alerta-cuerpo">
+    <div class="alerta-titulo" id="alertaTitulo"></div>
+    <div class="alerta-detalle" id="alertaDetalle"></div>
+  </div>
+  <div class="alerta-acciones">
+    <button type="button" id="alertaReintentar">Reintentar</button>
   </div>
 </div>
 
@@ -441,32 +465,93 @@ svg text{font-family:var(--font-body)}
   var SYNC_PENDING_KEY = "cartas_intencion_sync_pendiente_v1";
   var syncTimer = null, syncEnProgreso = false;
 
+  // Backoff exponencial. Antes el catch dejaba SYNC_PENDING_KEY en "1" y al
+  // final llamaba a subirCambios() de nuevo sin delay: mientras el POST
+  // fallara, era un bucle cerrado martillando la red. Ahora cada fallo espera
+  // el doble que el anterior, con techo de 60s.
+  var DEBOUNCE_MS = 1500;
+  var BACKOFF_BASE_MS = 2000;
+  var BACKOFF_MAX_MS = 60000;
+  var fallosSeguidos = 0;
+  var errorPermanente = false; // 4xx: reintentar no lo va a arreglar
+
+  function proximoBackoff(){
+    return Math.min(BACKOFF_BASE_MS * Math.pow(2, fallosSeguidos - 1), BACKOFF_MAX_MS);
+  }
+
   function marcarPendiente(){
     try{ localStorage.setItem(SYNC_PENDING_KEY, "1"); }catch(e){}
+    errorPermanente = false; // hay datos nuevos: vale volver a intentar
     setSyncStatus("pendiente");
+    programarSubida(DEBOUNCE_MS);
+  }
+  function programarSubida(ms){
     if(syncTimer) clearTimeout(syncTimer);
-    syncTimer = setTimeout(subirCambios, 100);
+    syncTimer = setTimeout(function(){ syncTimer = null; subirCambios(); }, ms);
   }
   function haySyncPendiente(){
     try{ return localStorage.getItem(SYNC_PENDING_KEY) === "1"; }catch(e){ return false; }
   }
-  function setSyncStatus(s){
+
+  // ---- Estado visible de la sincronización ----
+  var alerta = document.getElementById("alertaSync");
+  var alertaTitulo = document.getElementById("alertaTitulo");
+  var alertaDetalle = document.getElementById("alertaDetalle");
+
+  function setSyncStatus(s, detalle){
     var el = document.getElementById("syncStatus");
-    if(!el) return;
     var map = {
       sincronizado: ["☁️ Sincronizado", ""],
-      cargando: ["⏳ Cargando…", ""],
-      pendiente: ["⏳ Sincronizando…", ""],
-      subiendo: ["⏳ Sincronizando…", ""],
-      offline: ["⚠️ Sin conexión", "offline"]
+      cargando:     ["⏳ Cargando…", ""],
+      pendiente:    ["⏳ Sin sincronizar", ""],
+      subiendo:     ["⏳ Sincronizando…", ""],
+      offline:      ["⚠️ Sin conexión", "offline"],
+      error:        ["⛔ Error de sincronización", "error"]
     };
     var m = map[s] || map.sincronizado;
-    el.textContent = m[0];
-    el.className = "sync-status "+m[1];
+    if(el){
+      el.textContent = m[0];
+      el.className = "sync-status "+m[1];
+      el.title = detalle || "";
+    }
+    if(s === "error" || s === "offline"){ mostrarAlerta(s, detalle); }
+    else { ocultarAlerta(); }
+  }
+
+  function mostrarAlerta(tipo, detalle){
+    if(!alerta) return;
+    var SE_REINTENTA = "Tus cambios están guardados en este dispositivo y se van a subir solos cuando se restablezca.";
+    var NO_SE_REINTENTA = "Tus cambios están guardados en este dispositivo, pero no se van a subir hasta que esto se corrija.";
+    var cola = errorPermanente ? NO_SE_REINTENTA : SE_REINTENTA;
+    var cuerpo = detalle ? (detalle.replace(/\s*$/, "").replace(/([^.!?])$/, "$1.") + " ") : "";
+    if(tipo === "offline"){
+      alertaTitulo.textContent = "Sin conexión — los cambios no se subieron";
+    } else {
+      alertaTitulo.textContent = errorPermanente
+        ? "La sincronización está rechazando los datos"
+        : "La sincronización está fallando";
+    }
+    alertaDetalle.textContent = cuerpo + cola;
+    alerta.hidden = false;
+  }
+  function ocultarAlerta(){ if(alerta) alerta.hidden = true; }
+
+  // El Worker devuelve {error, detalle, hint} en JSON. Antes se descartaba y
+  // todo fallo se veía igual: "Sin conexión".
+  async function leerError(resp){
+    var partes = [];
+    try{
+      var cuerpo = await resp.json();
+      if(cuerpo && cuerpo.error) partes.push(cuerpo.error);
+      if(cuerpo && cuerpo.detalle) partes.push(cuerpo.detalle);
+      else if(cuerpo && cuerpo.hint) partes.push(cuerpo.hint);
+    }catch(e){}
+    if(!partes.length) partes.push("El servidor respondió "+resp.status+".");
+    return partes.join(" — ");
   }
 
   async function subirCambios(){
-    if(syncEnProgreso || !haySyncPendiente()) return;
+    if(syncEnProgreso || !haySyncPendiente() || errorPermanente) return;
     syncEnProgreso = true;
     setSyncStatus("subiendo");
     try{
@@ -475,26 +560,48 @@ svg text{font-family:var(--font-body)}
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({expedientes: state.expedientes, plazoDias: state.plazoDias})
       });
-      if(!resp.ok) throw new Error("POST falló: "+resp.status);
+      if(!resp.ok){
+        var msg = await leerError(resp);
+        // 4xx (salvo 429) es culpa del payload o de la configuración:
+        // reintentar en loop no lo arregla y oculta el problema.
+        if(resp.status >= 400 && resp.status < 500 && resp.status !== 429){
+          errorPermanente = true;
+        }
+        throw new Error(msg);
+      }
       try{ localStorage.removeItem(SYNC_PENDING_KEY); }catch(e){}
+      fallosSeguidos = 0;
       setSyncStatus("sincronizado");
     }catch(e){
-      setSyncStatus("offline");
+      fallosSeguidos++;
+      var sinRed = (typeof navigator !== "undefined" && navigator.onLine === false);
+      setSyncStatus(sinRed ? "offline" : "error", String(e.message || e));
+      if(!errorPermanente){
+        var espera = proximoBackoff();
+        console.warn("[sync] intento "+fallosSeguidos+" falló; reintento en "+(espera/1000)+"s:", e.message||e);
+        programarSubida(espera);
+      } else {
+        console.error("[sync] error permanente, no se reintenta:", e.message||e);
+      }
+      syncEnProgreso = false;
+      return;
     }
     syncEnProgreso = false;
-    if(haySyncPendiente()) subirCambios(); // llegó algo nuevo mientras el POST estaba en vuelo
+    // Llegó algo nuevo mientras el POST estaba en vuelo: lo mandamos, pero
+    // agendado, no por recursión inmediata.
+    if(haySyncPendiente()) programarSubida(DEBOUNCE_MS);
   }
 
   async function bajarCambiosIniciales(){
     if(haySyncPendiente()){
       // hay cambios locales sin subir: los subimos primero, nunca pisamos trabajo no sincronizado
-      subirCambios();
+      programarSubida(0);
       return;
     }
     setSyncStatus("cargando");
     try{
       var resp = await fetch("/api/sync");
-      if(!resp.ok) throw new Error("GET falló: "+resp.status);
+      if(!resp.ok) throw new Error(await leerError(resp));
       var datos = await resp.json();
       if(datos && Array.isArray(datos.expedientes) && datos.expedientes.length){
         state.expedientes = datos.expedientes;
@@ -503,10 +610,30 @@ svg text{font-family:var(--font-body)}
         renderList();
         if(!viewDash.hidden) renderDashboard();
       }
+      fallosSeguidos = 0;
       setSyncStatus("sincronizado");
     }catch(e){
-      setSyncStatus("offline");
+      fallosSeguidos++;
+      var sinRed = (typeof navigator !== "undefined" && navigator.onLine === false);
+      setSyncStatus(sinRed ? "offline" : "error", String(e.message || e));
+      console.warn("[sync] no se pudieron bajar los datos:", e.message||e);
     }
+  }
+
+  function reintentarAhora(){
+    errorPermanente = false;
+    fallosSeguidos = 0;
+    if(haySyncPendiente()) programarSubida(0);
+    else bajarCambiosIniciales();
+  }
+  var btnReintentar = document.getElementById("alertaReintentar");
+  if(btnReintentar) btnReintentar.addEventListener("click", reintentarAhora);
+
+  // Volvió la red: no esperamos el backoff completo.
+  if(typeof window !== "undefined" && window.addEventListener){
+    window.addEventListener("online", function(){
+      if(haySyncPendiente()){ fallosSeguidos = 0; programarSubida(0); }
+    });
   }
 
   var state = { expedientes: load(), editingId: null, modalMode: null, filterParque:"", filterRubro:"", filterSituacion:"", search:"", plazoDias: loadPlazo() };
