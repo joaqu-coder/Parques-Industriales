@@ -1,0 +1,13 @@
+{
+  "name": "egpais-cartas-intencion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PWA + Cloudflare Worker para el seguimiento de cartas de intención de parques industriales.",
+  "scripts": {
+    "test": "bash test/run.sh",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}
