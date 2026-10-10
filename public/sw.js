@@ -1,6 +1,6 @@
 // Subir la versión del cache cuando cambia index.html: sin eso, el navegador
 // sirve la copia vieja en la primera carga posterior al deploy.
-const CACHE = "egpais-cartas-intencion-v2";
+const CACHE = "egpais-cartas-intencion-v3";
 
 self.addEventListener("install", function(e){ self.skipWaiting(); });
 self.addEventListener("activate", function(e){
