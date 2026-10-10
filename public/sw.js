@@ -1,7 +1,16 @@
-const CACHE = "egpais-cartas-intencion-v1";
+// Subir la versión del cache cuando cambia index.html: sin eso, el navegador
+// sirve la copia vieja en la primera carga posterior al deploy.
+const CACHE = "egpais-cartas-intencion-v2";
 
 self.addEventListener("install", function(e){ self.skipWaiting(); });
-self.addEventListener("activate", function(e){ self.clients.claim(); });
+self.addEventListener("activate", function(e){
+  e.waitUntil(
+    caches.keys().then(function(names){
+      return Promise.all(names.filter(function(n){ return n !== CACHE; })
+                             .map(function(n){ return caches.delete(n); }));
+    }).then(function(){ return self.clients.claim(); })
+  );
+});
 
 self.addEventListener("fetch", function(e){
   var url = new URL(e.request.url);

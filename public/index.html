@@ -19,6 +19,7 @@
   --font-mono:ui-monospace,"SF Mono","Cascadia Code","Roboto Mono","Courier New",monospace;
   /* paleta categórica (parques) — orden fijo, no ciclar */
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+  --s7:#8c5ccc; --s8:#0aa2b0;
 }
 :root[data-theme="dark"]{
   --bg:#141414; --surface:#1d1d1d; --surface-2:#262625; --border:#38372f;
@@ -27,6 +28,7 @@
   --danger:#d26a5c; --danger-bg:#301e1b; --orange:#e3833f; --orange-bg:#2c2111;
   color-scheme: dark;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#54c254;
+  --s7:#9d6fe0; --s8:#0f94a2;
 }
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);font-family:var(--font-body);margin:0;padding-inline:16px;padding-block:20px;-webkit-font-smoothing:antialiased}
@@ -53,7 +55,8 @@ svg text{font-family:var(--font-body)}
 /* ---- Dashboard stat tiles ---- */
 .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px}
 .tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0}
-.tile .num{font-family:var(--font-mono);font-size:26px;font-weight:700;line-height:1.1}
+.tile .num{font-family:var(--font-mono);font-size:26px;font-weight:700;line-height:1.1;overflow-wrap:anywhere}
+.tile .num.num-sm{font-size:17px;line-height:1.35}
 .tile .label{font-size:12px;color:var(--muted);margin-top:2px}
 
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -68,13 +71,13 @@ svg text{font-family:var(--font-body)}
 .exp-card-empresa{font-size:15px;font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .exp-card-aside{flex:0 0 auto;display:flex;align-items:center;gap:6px}
 .exp-card-sub{font-size:11.5px;color:var(--muted);margin-top:3px}
-.example-tag{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px dashed var(--accent);border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap}
 .empty-state{padding:30px 14px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:6px;padding:3px 8px;white-space:nowrap}
 .badge.b-ok{background:var(--ok-bg);color:var(--ok)}
 .badge.b-warn{background:var(--warn-bg);color:var(--warn)}
 .badge.b-idle{background:var(--idle-bg);color:var(--idle)}
+.badge.b-danger{background:var(--danger-bg);color:var(--danger)}
 .badge-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
 
 /* semáforo: unico "sólido" el rojo (acción inmediata); el resto, fondo suave */
@@ -250,16 +253,19 @@ svg text{font-family:var(--font-body)}
 (function(){
   "use strict";
 
-  var PARQUES = ["Salta","Güemes","RDLF","Mosconi","Pichanal","SAC"];
-  var PARQUE_COLOR = {Salta:"--s1",Güemes:"--s2",RDLF:"--s3",Mosconi:"--s4",Pichanal:"--s5",SAC:"--s6"};
-  var RUBROS = ["Logística","Química","Alimenticia","Metalmecánica","Servicios","Textil",
+  var PARQUES = ["Salta","Güemes","RDLF","Mosconi","Pichanal","SAC","Olacapato","Salar de Pocitos"];
+  var PARQUE_COLOR = {Salta:"--s1",Güemes:"--s2",RDLF:"--s3",Mosconi:"--s4",Pichanal:"--s5",SAC:"--s6",
+                      Olacapato:"--s7","Salar de Pocitos":"--s8"};
+  var RUBROS = ["Manufactura","Servicios","Acopio","Logística","Química","Alimenticia",
+                "Metalmecánica","Metalúrgica","Comercio","Construcción","Textil",
                 "Materiales de construcción","Maderera","Plástica","Otro"];
   var SITUACIONES = [
     {id:"Sin_tratamiento", label:"Sin tratamiento"},
     {id:"En_tratamiento",  label:"En tratamiento"},
-    {id:"Adjudicada",      label:"Adjudicada"}
+    {id:"Adjudicada",      label:"Adjudicada"},
+    {id:"Desestimada",     label:"Desestimada"}
   ];
-  var STORAGE_KEY = "cartas_intencion_parques_v2";
+  var STORAGE_KEY = "cartas_intencion_parques_v3";
   var PLAZO_KEY = "cartas_intencion_plazo_v1";
 
   // Feriados nacionales (+ Güemes, 17/6, feriado en Salta) 2025-2026.
@@ -368,59 +374,22 @@ svg text{font-family:var(--font-body)}
   }
 
   function urgenciaDe(e, plazoDias){
-    if(e.situacion==="Adjudicada") return null; // ya resuelto, no aplica
+    if(e.situacion==="Adjudicada" || e.situacion==="Desestimada") return null; // ya resuelto, no aplica
     var plazo = calcularPlazo(e.fecha_inicio, plazoDias);
     if(!plazo) return null;
     var sem = obtenerSemaforo(plazo);
     return {color:sem.color, orden:sem.orden, texto:textoPlazo(plazo)};
   }
 
-  // ---- Datos de ejemplo ----
-  function ejemplos(){
-    var hoy = horaLocal();
-    return [
-      {id:uid(), ejemplo:true, nro_expediente:"363-65027/2026-0", fecha_inicio:"15/04/2026",
-       nombre_empresa:"Premoldeados del Norte S.A.",
-       parque_industrial:"Salta", rubro:"Materiales de construcción", superficie_solicitada_m2:1200,
-       actividad_empresa:"Fábrica de premoldeados de hormigón", situacion:"En_tratamiento",
-       representante_nombre:"Manuel Molina", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:hoy,
-       intervenciones:[{hora:hoy, texto:"Expediente cargado como ejemplo. Podés editarlo o eliminarlo.", tipo:"sistema"}]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-71140/2026-0", fecha_inicio:"02/02/2026",
-       nombre_empresa:"Logística del Valle S.R.L.",
-       parque_industrial:"Güemes", rubro:"Logística", superficie_solicitada_m2:800,
-       actividad_empresa:"Depósito y logística de insumos agrícolas", situacion:"Sin_tratamiento",
-       representante_nombre:"Carla Ibáñez", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"02/02/2026", intervenciones:[]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-40882/2025-0", fecha_inicio:"11/09/2025",
-       nombre_empresa:"Acopiadora Pichanal S.A.",
-       parque_industrial:"Pichanal", rubro:"Alimenticia", superficie_solicitada_m2:2500,
-       actividad_empresa:"Planta de acopio y secado de granos", situacion:"Adjudicada",
-       representante_nombre:"Jorge Villagrán", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"20/01/2026",
-       intervenciones:[{hora:"20/01/2026 10:15", texto:"Cambio de situación: En_tratamiento → Adjudicada", tipo:"sistema"}]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-58213/2025-0", fecha_inicio:"05/03/2025",
-       nombre_empresa:"Metalúrgica Ortiz Hnos.",
-       parque_industrial:"Salta", rubro:"Metalmecánica", superficie_solicitada_m2:950,
-       actividad_empresa:"Taller de mecanizado y estructuras metálicas", situacion:"Adjudicada",
-       representante_nombre:"Rubén Ortiz", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"18/08/2025", intervenciones:[]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-12044/2026-0", fecha_inicio:"20/01/2026",
-       nombre_empresa:"Agroquímica Patricia Luna",
-       parque_industrial:"RDLF", rubro:"Química", superficie_solicitada_m2:1800,
-       actividad_empresa:"Formulación de agroquímicos", situacion:"En_tratamiento",
-       representante_nombre:"Patricia Luna", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"03/06/2026", intervenciones:[]}
-    ];
-  }
-
+  // Sin datos de ejemplo: si no hay nada local, la lista arranca vacía y la
+  // carga real llega del Worker (/api/sync -> datos.json).
   function load(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return ejemplos();
+      if(!raw) return [];
       var data = JSON.parse(raw);
-      return (Array.isArray(data) && data.length) ? data : ejemplos();
-    }catch(e){ return ejemplos(); }
+      return Array.isArray(data) ? data : [];
+    }catch(e){ return []; }
   }
   function save(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes)); }catch(e){}
@@ -438,7 +407,7 @@ svg text{font-family:var(--font-body)}
   // ---- Sync: GitHub-como-base-de-datos detrás del Worker (/api/sync) ----
   // Guardado local SIEMPRE instantáneo (ya ocurrió arriba, en save()/savePlazo()).
   // La subida real va en background, debounced, y nunca bloquea al usuario.
-  var SYNC_PENDING_KEY = "cartas_intencion_sync_pendiente_v1";
+  var SYNC_PENDING_KEY = "cartas_intencion_sync_pendiente_v2";
   var syncTimer = null, syncEnProgreso = false;
 
   function marcarPendiente(){
@@ -566,16 +535,18 @@ svg text{font-family:var(--font-body)}
       return oa - ob;
     });
     if(!filtrados.length){
-      cont.innerHTML = '<div class="empty-state">Sin expedientes que coincidan con el filtro.</div>';
+      cont.innerHTML = '<div class="empty-state">'+
+        (state.expedientes.length ? 'Sin expedientes que coincidan con el filtro.'
+                                  : 'Todavía no hay expedientes cargados.')+'</div>';
       return;
     }
-    var SIT_BADGE = {Adjudicada:"b-ok", En_tratamiento:"b-warn", Sin_tratamiento:"b-idle"};
+    var SIT_BADGE = {Adjudicada:"b-ok", En_tratamiento:"b-warn", Sin_tratamiento:"b-idle", Desestimada:"b-danger"};
     cont.innerHTML = filtrados.map(function(x){
       var e = x.e, urg = x.urg;
       var sub = [e.parque_industrial, e.rubro].filter(Boolean).join(" · ");
       return '<button class="exp-card" data-open="'+e.id+'">'+
         '<div class="exp-card-main">'+
-          '<div class="exp-card-exp">'+esc(e.nro_expediente||"s/n")+(e.ejemplo?'<span class="example-tag">Ejemplo</span>':'')+'</div>'+
+          '<div class="exp-card-exp">'+esc(e.nro_expediente||"s/n")+'</div>'+
           '<div class="exp-card-empresa">'+esc(e.nombre_empresa||"(sin nombre de empresa)")+'</div>'+
           (sub?'<div class="exp-card-sub">'+esc(sub)+'</div>':'')+
         '</div>'+
@@ -591,14 +562,19 @@ svg text{font-family:var(--font-body)}
   }
 
   // ---- Dashboard ----
+  function m2(v){ return Math.round(v).toLocaleString("es-AR")+" m²"; }
+
   function tile(num,label,cls){
-    return '<div class="tile"><div class="num '+(cls||"")+'">'+esc(num)+'</div><div class="label">'+esc(label)+'</div></div>';
+    // los totales de superficie son largos: a partir de cierto largo, cuerpo chico
+    var klass = (cls||"")+(String(num).length>9 ? " num-sm" : "");
+    return '<div class="tile"><div class="num '+klass+'">'+esc(num)+'</div><div class="label">'+esc(label)+'</div></div>';
   }
 
   function renderDashboard(){
     var list = state.expedientes;
     var totalM2 = list.reduce(function(a,e){return a+(Number(e.superficie_solicitada_m2)||0);},0);
-    var porSituacion = {Sin_tratamiento:0, En_tratamiento:0, Adjudicada:0};
+    var porSituacion = {};
+    SITUACIONES.forEach(function(st){ porSituacion[st.id]=0; });
     list.forEach(function(e){ if(porSituacion[e.situacion]!=null) porSituacion[e.situacion]++; });
 
     var ultimaActualizacion = list.reduce(function(max,e){
@@ -611,19 +587,20 @@ svg text{font-family:var(--font-body)}
 
     document.getElementById("summary").innerHTML =
       tile(list.length, "Expedientes totales") +
-      tile(totalM2.toLocaleString("es-AR")+" m²", "Superficie total solicitada") +
+      tile(m2(totalM2), "Superficie total solicitada") +
       tile(porSituacion.Adjudicada, "Adjudicados") +
       tile(porSituacion.En_tratamiento, "En tratamiento") +
-      tile(porSituacion.Sin_tratamiento, "Sin tratamiento");
+      tile(porSituacion.Sin_tratamiento, "Sin tratamiento") +
+      tile(porSituacion.Desestimada, "Desestimadas");
 
     // -- m² por parque (barras horizontales, un solo color) --
     var m2PorParque = {};
     PARQUES.forEach(function(p){ m2PorParque[p]=0; });
     list.forEach(function(e){ if(e.parque_industrial) m2PorParque[e.parque_industrial] = (m2PorParque[e.parque_industrial]||0) + (Number(e.superficie_solicitada_m2)||0); });
-    renderBarList("chartM2", m2PorParque, function(v){ return v.toLocaleString("es-AR")+" m²"; });
+    renderBarList("chartM2", m2PorParque, m2);
 
     // -- situación (barras horizontales, color por status) --
-    var sitColor = {Adjudicada:"var(--ok)", En_tratamiento:"var(--warn)", Sin_tratamiento:"var(--idle)"};
+    var sitColor = {Adjudicada:"var(--ok)", En_tratamiento:"var(--warn)", Sin_tratamiento:"var(--idle)", Desestimada:"var(--danger)"};
     var sitData = {};
     SITUACIONES.forEach(function(s){ sitData[s.label] = porSituacion[s.id]; });
     renderBarList("chartSituacion", sitData, function(v){return String(v);}, function(label){
@@ -664,8 +641,9 @@ svg text{font-family:var(--font-body)}
     var porAnio = {}; // {anio: {parque: count}}
     list.forEach(function(e){
       var d = parseFechaLocal(e.fecha_inicio);
-      if(!d) return;
-      var anio = d.getFullYear();
+      // la planilla trae expedientes sin fecha de presentación pero con año de inicio
+      var anio = d ? d.getFullYear() : parseInt(e.anio_inicio_expediente,10);
+      if(!anio) return;
       porAnio[anio] = porAnio[anio] || {};
       porAnio[anio][e.parque_industrial] = (porAnio[anio][e.parque_industrial]||0) + 1;
     });
@@ -742,7 +720,7 @@ svg text{font-family:var(--font-body)}
   }
 
   function renderModalView(e){
-    var SIT_BADGE = {Adjudicada:"b-ok", En_tratamiento:"b-warn", Sin_tratamiento:"b-idle"};
+    var SIT_BADGE = {Adjudicada:"b-ok", En_tratamiento:"b-warn", Sin_tratamiento:"b-idle", Desestimada:"b-danger"};
     var urg = urgenciaDe(e, state.plazoDias);
     var hayContacto = e.representante_nombre || e.contacto_tel || e.contacto_mail;
 
@@ -853,7 +831,7 @@ svg text{font-family:var(--font-body)}
 
     var situacionAnterior = existing ? existing.situacion : null;
     var situacionNueva = g("situacion") || "Sin_tratamiento";
-    var exp = existing || {id:uid(), ejemplo:false, intervenciones:[]};
+    var exp = existing || {id:uid(), intervenciones:[]};
 
     exp.nro_expediente = g("nro_expediente").trim();
     exp.nombre_empresa = g("nombre_empresa").trim();

@@ -44,6 +44,38 @@ Repo de datos: `joaqu-coder/Parques-Industriales` (rama `main`, archivo `datos.j
 }
 ```
 
+`datos.json` está versionado en `main` con los 157 expedientes de la planilla
+de proyectos. La app no trae datos de ejemplo: si el navegador no tiene nada
+guardado, la lista arranca vacía y se llena con lo que devuelve `/api/sync`.
+
+## Importar la planilla (`scripts/importar-planilla.py`)
+
+```
+python3 scripts/importar-planilla.py Proyectos_10102026.json datos.json
+```
+
+Decisiones de la conversión, por si hay que repetirla:
+
+- `fecha_inicio` ← "Fecha de presetnación" (la planilla la trae en **M/D/YY**:
+  `9/1/26` es el 1 de septiembre de 2026). Es la fecha con la que corre el
+  semáforo de plazo. 24 expedientes no la tienen: quedan sin semáforo.
+- `anio_inicio_expediente` ← "Fecha de inicio expe." (solo el año). Se guarda
+  aparte y el gráfico anual lo usa como respaldo cuando no hay fecha de
+  presentación. En 18 filas ese año no coincide con el de la presentación: es
+  así en la planilla, no se tocó.
+- Situación: `ACTIVO` → **En tratamiento**, `DESESTIMADO` → **Desestimada**
+  (situación nueva, no corre plazo, igual que Adjudicada).
+- Rubro ← "Actividad", normalizando mayúsculas y typos (`Contrucción` →
+  Construcción, `Alimenticias` → Alimenticia, `servicios`/`Servicio` →
+  Servicios). Rubros nuevos: Manufactura, Servicios, Acopio, Metalúrgica,
+  Comercio, Construcción.
+- Parques nuevos: **Olacapato** y **Salar de Pocitos** (colores `--s7`/`--s8`,
+  validados para daltonismo junto con los otros seis).
+- Superficie: se guarda el número; cuando la planilla trae un rango
+  (`1500/2500`) se guarda el primer valor y el texto original va al historial.
+- "Observación" de la planilla → una nota en el historial del expediente.
+- `Sin dato` / `Sin datos` / `Sin contacto` / `Sin mail` → campo vacío.
+
 ## Limitación aceptada por ahora
 
 Última escritura gana — si dos dispositivos postean casi al mismo tiempo,
