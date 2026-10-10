@@ -1,8 +1,28 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<!-- Sin este viewport el navegador movil renderiza a 980px y hace zoom out:
+     todas las media queries de 420px/640px/860px de abajo quedaban muertas y
+     la UI mobile-first no se usaba nunca. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cartas de Intención — Parques Industriales</title>
+<meta name="description" content="Seguimiento de cartas de intención de los parques industriales de Salta.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f1ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cartas EGPAIS">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <script>
 (function(){
-  var saved = localStorage.getItem("cartas_intencion_theme_v1");
-  if(saved==="dark") document.documentElement.setAttribute("data-theme","dark");
+  try{
+    var saved = localStorage.getItem("cartas_intencion_theme_v1");
+    if(saved==="dark") document.documentElement.setAttribute("data-theme","dark");
+  }catch(e){ /* storage bloqueado: queda el tema claro por defecto */ }
 })();
 </script>
 <style>
@@ -109,6 +129,7 @@ svg text{font-family:var(--font-body)}
 .urg-amarillo{background:var(--warn-bg);color:var(--warn)}
 .urg-verde{background:var(--ok-bg);color:var(--ok)}
 .urg-na{color:var(--muted)}
+.urg-aviso{font-size:11.5px;color:var(--muted);margin-top:5px;line-height:1.4}
 
 /* ---- Modal ---- */
 .veil{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;z-index:20;padding-top:40px}
@@ -124,6 +145,9 @@ svg text{font-family:var(--font-body)}
 .field input,.field select,.field textarea{background:var(--surface-2);border:1px solid var(--border);color:var(--fg);border-radius:7px;padding:9px 10px;font-size:14px;font-family:inherit;width:100%}
 .field textarea{resize:vertical;min-height:60px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field-error{font-size:11.5px;color:var(--danger);margin-top:-1px}
+.field input[aria-invalid="true"],.field select[aria-invalid="true"]{border-color:var(--danger)}
+.field .req{color:var(--danger);margin-left:2px}
 @media (max-width:420px){.row2{grid-template-columns:1fr}}
 
 .hist{margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
@@ -239,7 +263,23 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
 /* ---- Indicador de sincronización ---- */
 .sync-status{font-size:11.5px;color:var(--muted);white-space:nowrap}
 .sync-status.offline{color:var(--danger)}
+.sync-status.error{color:var(--danger);font-weight:600}
+
+/* Un error de sincronización tiene que verse, no esconderse en un texto de
+   11px. Esto es lo que faltaba: el sync estuvo roto y la app decía
+   "Sincronizado". */
+.alerta{background:var(--danger-bg);border:1px solid var(--danger);border-left-width:4px;
+  border-radius:8px;padding:11px 13px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start}
+.alerta[hidden]{display:none}
+.alerta-cuerpo{flex:1;min-width:0}
+.alerta-titulo{font-size:13px;font-weight:700;color:var(--danger)}
+.alerta-detalle{font-size:12px;color:var(--fg);margin-top:4px;line-height:1.45;word-break:break-word}
+.alerta-acciones{display:flex;gap:6px;flex:0 0 auto}
+.alerta button{background:none;border:1px solid var(--danger);color:var(--danger);border-radius:6px;
+  padding:5px 9px;font-size:12px;font-weight:600}
 </style>
+</head>
+<body>
 
 <div class="topbar">
   <div>
@@ -247,19 +287,29 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     <h1>Cartas de Intención — Parques Industriales</h1>
   </div>
   <div style="display:flex;align-items:center;gap:12px">
-    <span class="sync-status" id="syncStatus">☁️ Sincronizado</span>
+    <span class="sync-status" id="syncStatus" role="status" aria-live="polite">⏳ Cargando…</span>
     <button class="btn-theme" id="btnTheme" aria-label="Cambiar a modo oscuro">🌙</button>
     <button class="btn-new" id="btnNew">+ Nuevo expediente</button>
   </div>
 </div>
 
-<div class="tabs">
-  <button class="tab" id="tabList">Listado</button>
-  <button class="tab" id="tabDash">Dashboard</button>
+<div class="alerta" id="alertaSync" hidden>
+  <div class="alerta-cuerpo">
+    <div class="alerta-titulo" id="alertaTitulo"></div>
+    <div class="alerta-detalle" id="alertaDetalle"></div>
+  </div>
+  <div class="alerta-acciones">
+    <button type="button" id="alertaReintentar">Reintentar</button>
+  </div>
+</div>
+
+<div class="tabs" role="tablist" aria-label="Vistas">
+  <button class="tab" id="tabList" role="tab" aria-selected="true" aria-controls="viewList">Listado</button>
+  <button class="tab" id="tabDash" role="tab" aria-selected="false" aria-controls="viewDash">Dashboard</button>
 </div>
 
 <!-- ===== VISTA LISTADO ===== -->
-<section class="view" id="viewList">
+<section class="view" id="viewList" role="tabpanel" aria-labelledby="tabList">
   <div class="toolbar">
     <select id="filterParque"><option value="">Todos los parques</option></select>
     <select id="filterRubro"><option value="">Todos los rubros</option></select>
@@ -273,7 +323,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   </div>
   <div class="settings-row">
     Plazo administrativo estimado (para el semáforo de urgencia):
-    <input type="number" id="plazoDias" min="1" step="1"> días hábiles desde fecha de inicio
+    <input type="number" id="plazoDias" min="1" max="3650" step="1"> días hábiles desde fecha de inicio
   </div>
   <div class="exp-list" id="expList"></div>
 </section>
@@ -281,7 +331,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
 <!-- ===== VISTA DASHBOARD ===== -->
 <!-- Pantalla separada del listado. El cuerpo lo arma renderDashboard() según
      la sección activa: nunca se muestran todas las secciones juntas. -->
-<section class="view" id="viewDash" hidden>
+<section class="view" id="viewDash" role="tabpanel" aria-labelledby="tabDash" hidden>
 
   <div class="sync-bar">
     <div>
@@ -297,7 +347,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
 
 </section>
 
-<div class="veil" id="veil" hidden><div class="modal" id="modal"></div></div>
+<div class="veil" id="veil" hidden><div class="modal" id="modal" role="dialog" aria-modal="true" aria-label="Ficha de expediente"></div></div>
 
 <script>
 (function(){
@@ -315,6 +365,11 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     {id:"Adjudicada",      label:"Adjudicada"},
     {id:"Desestimada",     label:"Desestimada"}
   ];
+  var SIN_PARQUE = "(sin parque)";
+  function colorParque(p){
+    return PARQUE_COLOR[p] ? "var("+PARQUE_COLOR[p]+")" : "var(--idle)";
+  }
+
   var STORAGE_KEY = "cartas_intencion_parques_v3";
   var PLAZO_KEY = "cartas_intencion_plazo_v1";
   var UMBRAL_KEY = "cartas_intencion_umbrales_v1";
@@ -327,7 +382,18 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
                    Sin_tratamiento:"b-idle", Desestimada:"b-danger"};
 
   // Feriados nacionales (+ Güemes, 17/6, feriado en Salta) 2025-2026.
-  // Revisar cada año: el gobierno confirma los feriados trasladables por decreto.
+  //
+  // IMPORTANTE: esta tabla tiene fecha de vencimiento. Los feriados
+  // trasladables y los puentes turísticos los fija el gobierno por decreto
+  // cada año, así que no se pueden calcular: hay que cargarlos a mano.
+  //
+  // El código ya NO asume que un año sin cargar no tiene feriados. Cuando un
+  // vencimiento cae más allá del último año cargado, el plazo se marca como
+  // estimado (con ~) en vez de darse por exacto. Antes, un expediente que
+  // vencía en 2027 se calculaba como si 2027 no tuviera ningún feriado, lo
+  // que adelantaba la fecha y disparaba urgencias falsas sin avisar.
+  //
+  // Para extender: agregá el año al array y listo, el aviso desaparece solo.
   var FERIADOS = [
     "2025-01-01","2025-03-03","2025-03-04","2025-03-24","2025-04-02","2025-04-18",
     "2025-05-01","2025-05-25","2025-06-17","2025-06-20","2025-07-09","2025-08-17",
@@ -336,6 +402,20 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     "2026-05-01","2026-05-25","2026-06-17","2026-06-20","2026-07-09","2026-08-17",
     "2026-10-12","2026-11-20","2026-12-08","2026-12-25"
   ];
+
+  // Último año cubierto por la tabla, derivado de los datos: no hay que
+  // acordarse de actualizar una constante aparte al agregar un año.
+  var FERIADOS_HASTA_ANIO = FERIADOS.reduce(function(max, f){
+    var a = parseInt(f.slice(0,4), 10);
+    return a > max ? a : max;
+  }, 0);
+  // La tabla tampoco empieza en el año 0: hay expedientes de 2013 cuya
+  // ventana de plazo cae entera antes del primer año cargado, con el mismo
+  // sesgo optimista que un vencimiento en el futuro sin cargar.
+  var FERIADOS_DESDE_ANIO = FERIADOS.reduce(function(min, f){
+    var a = parseInt(f.slice(0,4), 10);
+    return (min === 0 || a < min) ? a : min;
+  }, 0);
 
   function esc(s){
     return String(s==null?"":s).replace(/[&<>"']/g, function(c){
@@ -352,11 +432,21 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     return dd+"/"+mo+"/"+ahora.getFullYear()+" "+hh+":"+mm;
   }
 
+  // Estricta a propósito. La versión anterior aceptaba "31/02/2026" y devolvía
+  // el 3 de marzo sin avisar, y "99/99/9999" daba el año 10007. Como
+  // fecha_inicio es la entrada de la que depende TODO el semáforo, una fecha
+  // corrida en silencio es un plazo mal calculado en silencio.
   function parseFechaLocal(ddmmaaaa){
-    var p = String(ddmmaaaa||"").split("/");
-    if(p.length!==3) return null;
-    var d = new Date(parseInt(p[2],10), parseInt(p[1],10)-1, parseInt(p[0],10));
-    return isNaN(d.getTime()) ? null : d;
+    var txt = String(ddmmaaaa||"").trim();
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(txt);
+    if(!m) return null;
+    var dia = parseInt(m[1],10), mes = parseInt(m[2],10), anio = parseInt(m[3],10);
+    if(mes < 1 || mes > 12 || dia < 1 || dia > 31) return null;
+    if(anio < 1900 || anio > 2200) return null;
+    var d = new Date(anio, mes-1, dia);
+    // Si el Date se corrió (31/02 -> 03/03), los componentes no coinciden.
+    if(d.getFullYear()!==anio || d.getMonth()!==mes-1 || d.getDate()!==dia) return null;
+    return d;
   }
 
   function fechaISO(d){
@@ -371,14 +461,6 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     return h;
   }
 
-  function diasDesde(ddmmaaaa){
-    var d = parseFechaLocal(ddmmaaaa);
-    if(!d) return null;
-    var hoy = hoyLocal();
-    d.setHours(0,0,0,0);
-    return Math.round((hoy-d)/86400000);
-  }
-
   function uid(){ return "exp_"+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
   // ---- Semáforo: plazo administrativo estimado, contado en días hábiles ----
@@ -386,10 +468,15 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   function esFeriado(f){ return FERIADOS.indexOf(fechaISO(f))!==-1; }
   function esHabil(f){ return !esFinDeSemana(f) && !esFeriado(f); }
 
+  // Tope duro: el input de plazo no tiene max, así que un 999999999 pegado de
+  // casualidad hacía ~1.450.000.000 iteraciones y congelaba la pestaña.
+  var PLAZO_MAX_DIAS = 3650; // 10 años hábiles, de sobra para un trámite
+
   function calcularFechaFin(fechaInicioLocal, diasPlazo){
     var fecha = new Date(fechaInicioLocal.getTime());
     var contados = 0;
-    while(contados < diasPlazo){
+    var tope = Math.min(diasPlazo, PLAZO_MAX_DIAS);
+    while(contados < tope){
       fecha.setDate(fecha.getDate()+1);
       if(esHabil(fecha)) contados++;
     }
@@ -434,9 +521,16 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     var hoy = hoyLocal();
     var fechaFin = calcularFechaFin(inicio, diasPlazo);
     var vencido = fechaFin < hoy;
+    // Si el cálculo pisa años sin feriados cargados, el resultado es una
+    // estimación optimista (faltan feriados = la fecha sale antes de tiempo).
+    // Pasa de los dos lados: un vencimiento más allá del último año cargado,
+    // o un expediente que arrancó antes del primero.
+    var estimado = fechaFin.getFullYear() > FERIADOS_HASTA_ANIO ||
+                   inicio.getFullYear() < FERIADOS_DESDE_ANIO;
     return {
       fechaFin: fechaFin,
       vencido: vencido,
+      estimado: estimado,
       venceHoy: fechaFin.getTime()===hoy.getTime(),
       diasRestantes: vencido ? 0 : diasHabilesEntre(hoy, fechaFin),
       diasVencido: vencido ? diasHabilesEntre(fechaFin, hoy) : 0
@@ -451,9 +545,18 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   }
 
   function textoPlazo(plazo){
-    if(plazo.vencido) return plazo.diasVencido>0 ? "Vencido hace "+plazo.diasVencido+" d háb." : "Vencido";
-    if(plazo.venceHoy) return "Vence hoy";
-    return plazo.diasRestantes+" d háb.";
+    var t;
+    if(plazo.vencido) t = plazo.diasVencido>0 ? "Vencido hace "+plazo.diasVencido+" d háb." : "Vencido";
+    else if(plazo.venceHoy) t = "Vence hoy";
+    else t = plazo.diasRestantes+" d háb.";
+    return plazo.estimado ? "~"+t : t;
+  }
+
+  function avisoEstimado(plazo){
+    if(!plazo.estimado) return "";
+    return "Estimado: el cálculo pisa años sin feriados cargados (la tabla va de "+
+           FERIADOS_DESDE_ANIO+" a "+FERIADOS_HASTA_ANIO+
+           "). Faltan feriados, así que la fecha real es igual o posterior a esta.";
   }
 
   // Única fuente del semáforo: lee el plazo y los umbrales configurados.
@@ -463,7 +566,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     var plazo = calcularPlazo(e.fecha_inicio, state.plazoDias);
     if(!plazo) return null;
     var sem = obtenerSemaforo(plazo, state.umbrales);
-    return {color:sem.color, orden:sem.orden, texto:textoPlazo(plazo), plazo:plazo};
+    return {color:sem.color, orden:sem.orden, texto:textoPlazo(plazo),
+            plazo:plazo, estimado:plazo.estimado, aviso:avisoEstimado(plazo)};
   }
 
   // Sin datos de ejemplo: si no hay nada local, la lista arranca vacía y la
@@ -476,8 +580,15 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       return Array.isArray(data) ? data : [];
     }catch(e){ return []; }
   }
-  function save(){
+
+  function persistirLocal(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes)); }catch(e){}
+  }
+
+  // Salir de la demo: los ejemplos que el usuario no tocó se van, y queda
+  // marcado para que no vuelvan en la próxima carga.
+  function save(){
+    persistirLocal();
     marcarPendiente();
   }
   function loadPlazo(){
@@ -513,37 +624,101 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   var SYNC_PENDING_KEY = "cartas_intencion_sync_pendiente_v2";
   var syncTimer = null, syncEnProgreso = false;
 
+  // Backoff exponencial. Antes el catch dejaba SYNC_PENDING_KEY en "1" y al
+  // final llamaba a subirCambios() de nuevo sin delay: mientras el POST
+  // fallara, era un bucle cerrado martillando la red. Ahora cada fallo espera
+  // el doble que el anterior, con techo de 60s.
+  var DEBOUNCE_MS = 1500;
+  var BACKOFF_BASE_MS = 2000;
+  var BACKOFF_MAX_MS = 60000;
+  var fallosSeguidos = 0;
+  var errorPermanente = false; // 4xx: reintentar no lo va a arreglar
+
+  function proximoBackoff(){
+    return Math.min(BACKOFF_BASE_MS * Math.pow(2, fallosSeguidos - 1), BACKOFF_MAX_MS);
+  }
+
   function marcarPendiente(){
     try{ localStorage.setItem(SYNC_PENDING_KEY, "1"); }catch(e){}
+    errorPermanente = false; // hay datos nuevos: vale volver a intentar
     setSyncStatus("pendiente");
+    programarSubida(DEBOUNCE_MS);
+  }
+  function programarSubida(ms){
     if(syncTimer) clearTimeout(syncTimer);
-    syncTimer = setTimeout(subirCambios, 100);
+    syncTimer = setTimeout(function(){ syncTimer = null; subirCambios(); }, ms);
   }
   function haySyncPendiente(){
     try{ return localStorage.getItem(SYNC_PENDING_KEY) === "1"; }catch(e){ return false; }
   }
-  function setSyncStatus(s){
+
+  // ---- Estado visible de la sincronización ----
+  var alerta = document.getElementById("alertaSync");
+  var alertaTitulo = document.getElementById("alertaTitulo");
+  var alertaDetalle = document.getElementById("alertaDetalle");
+
+  function setSyncStatus(s, detalle){
     var el = document.getElementById("syncStatus");
-    if(!el) return;
     var map = {
       sincronizado: ["☁️ Sincronizado", ""],
-      cargando: ["⏳ Cargando…", ""],
-      pendiente: ["⏳ Sincronizando…", ""],
-      subiendo: ["⏳ Sincronizando…", ""],
-      offline: ["⚠️ Sin conexión", "offline"]
+      cargando:     ["⏳ Cargando…", ""],
+      pendiente:    ["⏳ Sin sincronizar", ""],
+      subiendo:     ["⏳ Sincronizando…", ""],
+      offline:      ["⚠️ Sin conexión", "offline"],
+      error:        ["⛔ Error de sincronización", "error"]
     };
     var m = map[s] || map.sincronizado;
-    el.textContent = m[0];
-    el.className = "sync-status "+m[1];
+    if(el){
+      el.textContent = m[0];
+      el.className = "sync-status "+m[1];
+      el.title = detalle || "";
+    }
+    if(s === "error" || s === "offline"){ mostrarAlerta(s, detalle); }
+    else { ocultarAlerta(); }
     actualizarSyncBar(); // la fecha de última sync vive arriba del dashboard
   }
 
+  // Momento del último ida y vuelta exitoso con el Worker. Lo muestra el
+  // dashboard arriba de todo: sin esto no hay forma de saber qué tan vieja
+  // es la foto que estás mirando.
   function marcarSyncOk(){
     try{ localStorage.setItem(SYNC_AT_KEY, new Date().toISOString()); }catch(e){}
   }
 
+  function mostrarAlerta(tipo, detalle){
+    if(!alerta) return;
+    var SE_REINTENTA = "Tus cambios están guardados en este dispositivo y se van a subir solos cuando se restablezca.";
+    var NO_SE_REINTENTA = "Tus cambios están guardados en este dispositivo, pero no se van a subir hasta que esto se corrija.";
+    var cola = errorPermanente ? NO_SE_REINTENTA : SE_REINTENTA;
+    var cuerpo = detalle ? (detalle.replace(/\s*$/, "").replace(/([^.!?])$/, "$1.") + " ") : "";
+    if(tipo === "offline"){
+      alertaTitulo.textContent = "Sin conexión — los cambios no se subieron";
+    } else {
+      alertaTitulo.textContent = errorPermanente
+        ? "La sincronización está rechazando los datos"
+        : "La sincronización está fallando";
+    }
+    alertaDetalle.textContent = cuerpo + cola;
+    alerta.hidden = false;
+  }
+  function ocultarAlerta(){ if(alerta) alerta.hidden = true; }
+
+  // El Worker devuelve {error, detalle, hint} en JSON. Antes se descartaba y
+  // todo fallo se veía igual: "Sin conexión".
+  async function leerError(resp){
+    var partes = [];
+    try{
+      var cuerpo = await resp.json();
+      if(cuerpo && cuerpo.error) partes.push(cuerpo.error);
+      if(cuerpo && cuerpo.detalle) partes.push(cuerpo.detalle);
+      else if(cuerpo && cuerpo.hint) partes.push(cuerpo.hint);
+    }catch(e){}
+    if(!partes.length) partes.push("El servidor respondió "+resp.status+".");
+    return partes.join(" — ");
+  }
+
   async function subirCambios(){
-    if(syncEnProgreso || !haySyncPendiente()) return;
+    if(syncEnProgreso || !haySyncPendiente() || errorPermanente) return;
     syncEnProgreso = true;
     setSyncStatus("subiendo");
     try{
@@ -552,45 +727,133 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({expedientes: state.expedientes, plazoDias: state.plazoDias, umbrales: state.umbrales})
       });
-      if(!resp.ok) throw new Error("POST falló: "+resp.status);
+      if(!resp.ok){
+        var msg = await leerError(resp);
+        // 4xx (salvo 429) es culpa del payload o de la configuración:
+        // reintentar en loop no lo arregla y oculta el problema.
+        if(resp.status >= 400 && resp.status < 500 && resp.status !== 429){
+          errorPermanente = true;
+        }
+        throw new Error(msg);
+      }
       try{ localStorage.removeItem(SYNC_PENDING_KEY); }catch(e){}
+      fallosSeguidos = 0;
       marcarSyncOk();
       setSyncStatus("sincronizado");
     }catch(e){
-      setSyncStatus("offline");
+      fallosSeguidos++;
+      var sinRed = (typeof navigator !== "undefined" && navigator.onLine === false);
+      setSyncStatus(sinRed ? "offline" : "error", String(e.message || e));
+      if(!errorPermanente){
+        var espera = proximoBackoff();
+        console.warn("[sync] intento "+fallosSeguidos+" falló; reintento en "+(espera/1000)+"s:", e.message||e);
+        programarSubida(espera);
+      } else {
+        console.error("[sync] error permanente, no se reintenta:", e.message||e);
+      }
+      syncEnProgreso = false;
+      return;
     }
     syncEnProgreso = false;
-    if(haySyncPendiente()) subirCambios(); // llegó algo nuevo mientras el POST estaba en vuelo
+    // Llegó algo nuevo mientras el POST estaba en vuelo: lo mandamos, pero
+    // agendado, no por recursión inmediata.
+    if(haySyncPendiente()) programarSubida(DEBOUNCE_MS);
   }
 
   async function bajarCambiosIniciales(){
     if(haySyncPendiente()){
       // hay cambios locales sin subir: los subimos primero, nunca pisamos trabajo no sincronizado
-      subirCambios();
+      programarSubida(0);
       return;
     }
     setSyncStatus("cargando");
     try{
       var resp = await fetch("/api/sync");
-      if(!resp.ok) throw new Error("GET falló: "+resp.status);
+      if(!resp.ok) throw new Error(await leerError(resp));
       var datos = await resp.json();
-      if(datos && Array.isArray(datos.expedientes) && datos.expedientes.length){
+      if(!datos || !Array.isArray(datos.expedientes)){
+        throw new Error("El servidor devolvió datos con una forma inesperada.");
+      }
+
+      // plazoDias se adopta por su cuenta. Antes estaba anidado dentro del if
+      // de expedientes, así que cambiar solo el plazo nunca llegaba a otro
+      // dispositivo.
+      var cambio = false;
+      var plazoRemoto = Number(datos.plazoDias);
+      if(Number.isFinite(plazoRemoto) && plazoRemoto > 0 && plazoRemoto !== state.plazoDias){
+        state.plazoDias = plazoRemoto;
+        plazoInput.value = state.plazoDias;
+        try{ localStorage.setItem(PLAZO_KEY, String(state.plazoDias)); }catch(e){}
+        cambio = true;
+      }
+
+      // Los umbrales viajan igual que el plazo: por su cuenta, fuera del if
+      // de expedientes, para que cambiar solo la configuración del semáforo
+      // llegue a los demás dispositivos.
+      if(datos.umbrales){
+        var uRemotos = normalizarUmbrales(datos.umbrales);
+        if(uRemotos.alerta !== state.umbrales.alerta || uRemotos.critico !== state.umbrales.critico){
+          state.umbrales = uRemotos;
+          try{ localStorage.setItem(UMBRAL_KEY, JSON.stringify(state.umbrales)); }catch(e){}
+          cambio = true;
+        }
+      }
+
+      // Si datos.json existe, el repo es la fuente de verdad — incluso con
+      // cero expedientes. Antes un repo vacío se ignoraba y la demo local
+      // sobrevivía para después subirse.
+      var repoInicializado = !(datos._meta && datos._meta.existe === false);
+      if(repoInicializado){
         state.expedientes = datos.expedientes;
-        if(datos.plazoDias){ state.plazoDias = datos.plazoDias; plazoInput.value = state.plazoDias; }
-        if(datos.umbrales){ state.umbrales = normalizarUmbrales(datos.umbrales); }
-        try{
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes));
-          localStorage.setItem(PLAZO_KEY, String(state.plazoDias));
-          localStorage.setItem(UMBRAL_KEY, JSON.stringify(state.umbrales));
-        }catch(e){}
+        persistirLocal();
+        cambio = true;
+      }
+
+      if(cambio){
         renderList();
       }
+      fallosSeguidos = 0;
       marcarSyncOk();
       setSyncStatus("sincronizado");
       if(!viewDash.hidden) renderDashboard();
     }catch(e){
-      setSyncStatus("offline");
+      fallosSeguidos++;
+      var sinRed = (typeof navigator !== "undefined" && navigator.onLine === false);
+      setSyncStatus(sinRed ? "offline" : "error", String(e.message || e));
+      console.warn("[sync] no se pudieron bajar los datos:", e.message||e);
     }
+  }
+
+  // Los datos solo se bajaban al abrir la app, asi que los cambios hechos en
+  // otro dispositivo no aparecian hasta recargar entera — mientras el cartel
+  // decia "Sincronizado". Ahora tambien se refresca al volver a la pestaña.
+  var ultimoRefresco = Date.now();
+  var REFRESCO_MIN_MS = 30000;
+  function refrescarSiCorresponde(){
+    if(document.hidden) return;
+    if(!veil.hidden) return;                 // modal abierto: no le muevas el piso
+    if(haySyncPendiente()) return;
+    if(Date.now() - ultimoRefresco < REFRESCO_MIN_MS) return;
+    ultimoRefresco = Date.now();
+    bajarCambiosIniciales();
+  }
+  document.addEventListener("visibilitychange", refrescarSiCorresponde);
+  window.addEventListener("focus", refrescarSiCorresponde);
+
+  function reintentarAhora(){
+    errorPermanente = false;
+    fallosSeguidos = 0;
+    if(haySyncPendiente()) programarSubida(0);
+    else bajarCambiosIniciales();
+  }
+  var btnReintentar = document.getElementById("alertaReintentar");
+  if(btnReintentar) btnReintentar.addEventListener("click", reintentarAhora);
+
+  // Volvió la red: no esperamos el backoff completo.
+  if(typeof window !== "undefined" && window.addEventListener){
+    window.addEventListener("online", function(){
+      if(haySyncPendiente()){ fallosSeguidos = 0; programarSubida(0); }
+    });
   }
 
   var state = {
@@ -604,16 +867,26 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   // ---- Tabs / routing ----
   var tabList = document.getElementById("tabList"), tabDash = document.getElementById("tabDash");
   var viewList = document.getElementById("viewList"), viewDash = document.getElementById("viewDash");
-  function showView(name){
+  function showView(name, desdeHash){
     var isDash = name==="dashboard";
     viewList.hidden = isDash; viewDash.hidden = !isDash;
     tabList.classList.toggle("active", !isDash);
     tabDash.classList.toggle("active", isDash);
+    tabList.setAttribute("aria-selected", String(!isDash));
+    tabDash.setAttribute("aria-selected", String(isDash));
     if(isDash) renderDashboard();
-    location.hash = isDash ? "#dashboard" : "";
+    if(desdeHash) return; // vino del hash: no lo reescribas, sería un bucle
+    var destino = isDash ? "#dashboard" : "#listado";
+    if(location.hash !== destino) location.hash = destino;
   }
   tabList.addEventListener("click", function(){ showView("list"); });
   tabDash.addEventListener("click", function(){ showView("dashboard"); });
+
+  // Sin esto, el botón "atrás" del navegador cambiaba la URL y dejaba la
+  // vista como estaba.
+  window.addEventListener("hashchange", function(){
+    showView(location.hash === "#dashboard" ? "dashboard" : "list", true);
+  });
 
   // ---- Filtros ----
   var selParque = document.getElementById("filterParque");
@@ -629,8 +902,12 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   plazoInput.value = state.plazoDias;
   plazoInput.addEventListener("change", function(){
     var v = parseInt(this.value,10);
-    if(v>0){ state.plazoDias=v; savePlazo(v); renderList(); if(!viewDash.hidden) renderDashboard(); }
-    else { this.value = state.plazoDias; }
+    // Antes un valor inválido se descartaba en silencio y el input quedaba
+    // mostrando un número que la app no estaba usando.
+    if(!(v>0)){ this.value = state.plazoDias; return; }
+    if(v > PLAZO_MAX_DIAS) v = PLAZO_MAX_DIAS;
+    this.value = v;
+    state.plazoDias=v; savePlazo(v); renderList(); if(!viewDash.hidden) renderDashboard();
   });
 
   function expedientesFiltrados(){
@@ -639,7 +916,11 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       if(state.filterRubro && e.rubro!==state.filterRubro) return false;
       if(state.filterSituacion && e.situacion!==state.filterSituacion) return false;
       if(state.search){
-        var blob = (e.nombre_empresa+" "+e.actividad_empresa+" "+e.nro_expediente+" "+e.representante_nombre).toLowerCase();
+        // Concatenar directo metía la cadena "undefined" en el blob cuando
+        // faltaba un campo, así que buscar "undefined" matcheaba registros
+        // incompletos.
+        var blob = [e.nombre_empresa, e.actividad_empresa, e.nro_expediente, e.representante_nombre]
+          .filter(Boolean).join(" ").toLowerCase();
         if(blob.indexOf(state.search)===-1) return false;
       }
       return true;
@@ -657,9 +938,10 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       return oa - ob;
     });
     if(!filtrados.length){
-      cont.innerHTML = '<div class="empty-state">'+
-        (state.expedientes.length ? 'Sin expedientes que coincidan con el filtro.'
-                                  : 'Todavía no hay expedientes cargados.')+'</div>';
+      var vacio = state.expedientes.length
+        ? "Sin expedientes que coincidan con el filtro."
+        : "Todavía no hay expedientes cargados. Tocá « + Nuevo expediente » para empezar.";
+      cont.innerHTML = '<div class="empty-state">'+esc(vacio)+'</div>';
       return;
     }
     cont.innerHTML = filtrados.map(function(x){ return expCardHtml(x.e, x.urg); }).join("");
@@ -677,7 +959,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
         (subExtra?'<div class="exp-card-sub">'+esc(subExtra)+'</div>':'')+
       '</div>'+
       '<div class="exp-card-aside">'+
-        (urg?'<span class="urg urg-'+urg.color+'">'+esc(urg.texto)+'</span>':'')+
+        (urg?'<span class="urg urg-'+urg.color+'"'+(urg.aviso?' title="'+esc(urg.aviso)+'"':'')+
+             '>'+esc(urg.texto)+'</span>':'')+
         '<span class="badge '+(SIT_BADGE[e.situacion]||"b-idle")+'">'+esc(labelSituacion(e.situacion))+'</span>'+
       '</div>'+
       '</button>';
@@ -718,9 +1001,6 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   function claveEmpresa(nombre){
     return String(nombre||"").trim().toLowerCase().replace(/\s+/g," ").replace(/\.$/,"");
   }
-  function colorParque(p){
-    return PARQUE_COLOR[p] ? "var("+PARQUE_COLOR[p]+")" : "var(--idle)";
-  }
   function tieneSuperficie(e){
     var v = e.superficie_solicitada_m2;
     if(v==="" || v==null) return false;
@@ -738,7 +1018,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       parques: [], rubros: [], empresasIdx: {},
       porAnio: {}, anios: [], ordenParques: [],
       urg: {items:[], conteo:{rojo:0,naranja:0,amarillo:0,verde:0}, sinFecha:0, noAplica:0},
-      sinParque: 0, sinRubro: 0, ultimoMovimiento: null
+      sinParque: 0, sinRubro: 0, sinFechaAnual: 0, ultimoMovimiento: null
     };
     SITUACIONES.forEach(function(s){ m.porSituacion[s.id] = 0; });
 
@@ -757,7 +1037,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       if(conSup){ m.m2.suma += sup; m.m2.conDato++; } else { m.m2.sinDato++; }
 
       // -- parque --
-      var p = e.parque_industrial || "(sin parque)";
+      var p = e.parque_industrial || SIN_PARQUE;
       if(!e.parque_industrial) m.sinParque++;
       if(!porParque[p]) porParque[p] = {nombre:p, solicitudes:0, adjudicadas:0, m2:0, m2ConDato:0, m2SinDato:0};
       var sp = porParque[p];
@@ -787,6 +1067,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
         var anio = d.getFullYear();
         m.porAnio[anio] = m.porAnio[anio] || {};
         m.porAnio[anio][p] = (m.porAnio[anio][p]||0) + 1;
+      } else {
+        m.sinFechaAnual++; // no entra en ningún año: el gráfico lo declara
       }
 
       var mov = parseFechaLocal((e.fecha_ultimo_movimiento||"").split(" ")[0]);
@@ -1077,7 +1359,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     if(state.drill && state.drill.tipo==="parque"){
       var nombre = state.drill.valor;
       var items = state.expedientes.filter(function(e){
-        return (e.parque_industrial||"(sin parque)")===nombre;
+        return (e.parque_industrial||SIN_PARQUE)===nombre;
       });
       html += drillPanel("Parque "+nombre, items);
     }
@@ -1092,7 +1374,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       (m.rubros.length ? recorte("rubro", m.rubros).map(function(r){
         return mrow(r.nombre, {
           magnitud: r.solicitudes, max: maxSol,
-          valor: nf(r.solicitudes)+' <span class="sub">cartas · '+r.empresas+' empresa'+(r.empresas===1?"":"s")+'</span>',
+          valor: nf(r.solicitudes)+' <span class="sub">'+(r.solicitudes===1?"carta":"cartas")+
+            ' · '+r.empresas+' empresa'+(r.empresas===1?"":"s")+'</span>',
           drill: ["rubro", r.nombre], sel: drillActivo("rubro", r.nombre)
         });
       }).join("") : '<div class="chart-sub">Sin datos todavía.</div>')+
@@ -1337,7 +1620,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     var anios = m.anios;
     if(!anios.length){
       svg.innerHTML = "";
-      legend.innerHTML = '<span>Sin fechas de inicio cargadas.</span>';
+      legend.innerHTML = '<span>Sin fechas de inicio cargadas'+
+        (m.sinFechaAnual ? ' ('+m.sinFechaAnual+' expedientes sin fecha válida)' : '')+'.</span>';
       return;
     }
     var orden = m.ordenParques;
@@ -1379,7 +1663,14 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       return anios.some(function(a){ return (m.porAnio[a][p]||0)>0; });
     }).map(function(p){
       return '<span><i style="background:'+colorParque(p)+'"></i>'+esc(p)+'</span>';
-    }).join("");
+    }).join("") +
+    // Un expediente sin fecha válida no entra en ningún año. Antes se perdía
+    // sin dejar rastro; ahora el gráfico dice cuántos no está mostrando.
+    (m.sinFechaAnual
+      ? '<span>'+esc(m.sinFechaAnual+(m.sinFechaAnual===1
+          ? " expediente sin fecha válida, fuera del gráfico"
+          : " expedientes sin fecha válida, fuera del gráfico"))+'</span>'
+      : "");
   }
 
   // ---- Modal: nuevo / editar ----
@@ -1387,12 +1678,51 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   document.getElementById("btnNew").addEventListener("click", function(){ openModal(null); });
   veil.addEventListener("click", function(ev){ if(ev.target===veil) closeModal(); });
 
+  var focoPrevio = null;
+
   function openModal(id){
+    focoPrevio = document.activeElement;
     state.editingId = id;
     state.modalMode = id ? "view" : "edit";
     veil.hidden = false;
+    // El fondo scrolleaba detrás del modal, sobre todo en iOS.
+    document.body.style.overflow = "hidden";
     renderModal();
+    enfocarPrimero();
   }
+
+  function focusables(){
+    // Ojo con la precedencia: `!a && b || c` es `(!a && b) || c`. Una versión
+    // con ese encadenado dejaba pasar los botones deshabilitados y, donde
+    // offsetParent no está implementado, descartaba todos los campos.
+    return Array.prototype.filter.call(
+      modal.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])'),
+      function(el){ return !el.disabled && !el.hidden; }
+    );
+  }
+  function enfocarPrimero(){
+    var f = focusables();
+    // El primero suele ser la X de cerrar; preferimos el primer campo real.
+    var campo = modal.querySelector("input,select,textarea");
+    var destino = campo || f[0];
+    if(destino && destino.focus) destino.focus();
+  }
+
+  // Trampa de foco: sin esto, tabular dentro de un diálogo modal se escapaba
+  // a la página de atrás, que para un lector de pantalla no existe.
+  modal.addEventListener("keydown", function(ev){
+    if(ev.key !== "Tab") return;
+    var f = focusables();
+    if(!f.length) return;
+    var primero = f[0], ultimo = f[f.length-1];
+    if(ev.shiftKey && document.activeElement === primero){ ev.preventDefault(); ultimo.focus(); }
+    else if(!ev.shiftKey && document.activeElement === ultimo){ ev.preventDefault(); primero.focus(); }
+  });
+
+  // Escape cierra, que es lo que todo el mundo espera de un modal.
+  document.addEventListener("keydown", function(ev){
+    if(ev.key === "Escape" && !veil.hidden) closeModal();
+  });
 
   function renderModal(){
     var id = state.editingId;
@@ -1413,7 +1743,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
           '<div class="view-exp">'+esc(e.nro_expediente||"s/n")+'</div></div>'+
         '<span class="badge '+(SIT_BADGE[e.situacion]||"b-idle")+'">'+esc(labelSituacion(e.situacion))+'</span>'+
       '</div>'+
-      (urg?'<div class="view-urg"><span class="urg urg-'+urg.color+'">'+esc(urg.texto)+'</span></div>':'')+
+      (urg?'<div class="view-urg"><span class="urg urg-'+urg.color+'">'+esc(urg.texto)+'</span>'+
+           (urg.aviso?'<div class="urg-aviso">'+esc(urg.aviso)+'</div>':'')+'</div>':'')+
 
       '<div class="view-section"><h3>Expediente</h3>'+
         '<div class="view-grid">'+
@@ -1443,7 +1774,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       '</div>';
 
     document.getElementById("xClose").addEventListener("click", closeModal);
-    document.getElementById("btnEdit").addEventListener("click", function(){ state.modalMode="edit"; renderModal(); });
+    document.getElementById("btnEdit").addEventListener("click", function(){ state.modalMode="edit"; renderModal(); enfocarPrimero(); });
     document.getElementById("btnDelete").addEventListener("click", onDelete);
   }
 
@@ -1456,8 +1787,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       '<div class="modal-head"><h2>'+(isNew?"Nuevo expediente":"Editar expediente")+'</h2><button class="x-close" id="xClose">&times;</button></div>'+
       '<form id="expForm">'+
         field("nro_expediente","Nro. de expediente","text",e,"363-65027/2026-0",true)+
-        field("nombre_empresa","Nombre de la empresa","text",e,"Premoldeados del Norte S.A.")+
-        '<div class="row2">'+field("fecha_inicio","Fecha de inicio","text",e,"dd/mm/aaaa")+selectField("parque_industrial","Parque industrial",PARQUES,e)+'</div>'+
+        field("nombre_empresa","Nombre de la empresa","text",e,"Premoldeados del Norte S.A.",false,true)+
+        '<div class="row2">'+field("fecha_inicio","Fecha de inicio","text",e,"dd/mm/aaaa",false,true)+selectField("parque_industrial","Parque industrial",PARQUES,e)+'</div>'+
         '<div class="row2">'+field("superficie_solicitada_m2","Superficie solicitada (m²)","number",e)+selectField("rubro","Rubro",RUBROS,e)+'</div>'+
         selectField("situacion","Situación",SITUACIONES.map(function(s){return s.id;}),e,SITUACIONES)+
         field("actividad_empresa","Actividad de la empresa","text",e,"Fábrica de premoldeados de hormigón")+
@@ -1478,10 +1809,45 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     if(cancelBtn) cancelBtn.addEventListener("click", function(){ state.modalMode="view"; renderModal(); });
   }
 
-  function field(name,label,type,e,placeholder,mono){
+  function field(name,label,type,e,placeholder,mono,requerido){
     var val = e ? (e[name]==null?"":e[name]) : "";
-    return '<div class="field"><label for="f_'+name+'">'+esc(label)+'</label>'+
-      '<input class="'+(mono?"mono":"")+'" id="f_'+name+'" name="'+name+'" type="'+type+'" value="'+esc(val)+'" placeholder="'+esc(placeholder||"")+'"></div>';
+    return '<div class="field" data-campo="'+name+'"><label for="f_'+name+'">'+esc(label)+
+      (requerido?'<span class="req" aria-hidden="true">*</span>':'')+'</label>'+
+      '<input class="'+(mono?"mono":"")+'" id="f_'+name+'" name="'+name+'" type="'+type+'"'+
+      (requerido?' aria-required="true"':'')+
+      ' value="'+esc(val)+'" placeholder="'+esc(placeholder||"")+'"></div>';
+  }
+
+  // Validación en un solo lugar, para que el formulario y cualquier dato que
+  // entre por sync se midan con la misma vara.
+  function validarExpediente(v){
+    var errores = {};
+    if(!v.nombre_empresa) errores.nombre_empresa = "Poné el nombre de la empresa.";
+    if(!v.fecha_inicio) errores.fecha_inicio = "Poné la fecha de inicio: sin ella no hay semáforo de plazo.";
+    else if(!parseFechaLocal(v.fecha_inicio)) errores.fecha_inicio = "Fecha inválida. Usá dd/mm/aaaa (por ejemplo 09/10/2026).";
+    if(v.superficie_solicitada_m2 !== "" && !(Number(v.superficie_solicitada_m2) >= 0)){
+      errores.superficie_solicitada_m2 = "La superficie tiene que ser un número.";
+    }
+    return errores;
+  }
+
+  function mostrarErrores(errores){
+    modal.querySelectorAll(".field-error").forEach(function(n){ n.remove(); });
+    modal.querySelectorAll('[aria-invalid="true"]').forEach(function(n){ n.removeAttribute("aria-invalid"); });
+    var primero = null;
+    Object.keys(errores).forEach(function(campo){
+      var cont = modal.querySelector('[data-campo="'+campo+'"]');
+      var input = document.getElementById("f_"+campo);
+      if(input) input.setAttribute("aria-invalid","true");
+      if(cont){
+        var nota = document.createElement("div");
+        nota.className = "field-error";
+        nota.textContent = errores[campo];
+        cont.appendChild(nota);
+      }
+      if(!primero) primero = input;
+    });
+    if(primero){ primero.focus(); if(primero.scrollIntoView) primero.scrollIntoView({block:"center"}); }
   }
   function selectField(name,label,options,e,labelMap){
     var current = e ? e[name] : (name==="situacion" ? "Sin_tratamiento" : "");
@@ -1502,7 +1868,14 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
       : '<div class="hist-empty">Sin notas aún.</div>';
     return '<div class="hist"><h3>Historial ('+notas.length+')</h3>'+body+'</div>';
   }
-  function closeModal(){ veil.hidden = true; state.editingId = null; state.modalMode = null; }
+  function closeModal(){
+    veil.hidden = true;
+    state.editingId = null;
+    state.modalMode = null;
+    document.body.style.overflow = "";
+    if(focoPrevio && focoPrevio.focus) focoPrevio.focus();
+    focoPrevio = null;
+  }
 
   function onSave(ev){
     ev.preventDefault();
@@ -1513,6 +1886,18 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
 
     var situacionAnterior = existing ? existing.situacion : null;
     var situacionNueva = g("situacion") || "Sin_tratamiento";
+
+    // Validar ANTES de mutar nada: antes el formulario se podía enviar
+    // completamente vacío y creaba un expediente en blanco, y una fecha
+    // inválida se guardaba corrida o dejaba el semáforo mudo.
+    var candidato = {
+      nombre_empresa: g("nombre_empresa").trim(),
+      fecha_inicio: g("fecha_inicio").trim(),
+      superficie_solicitada_m2: g("superficie_solicitada_m2").trim()
+    };
+    var errores = validarExpediente(candidato);
+    if(Object.keys(errores).length){ mostrarErrores(errores); return; }
+
     var exp = existing || {id:uid(), intervenciones:[]};
 
     exp.nro_expediente = g("nro_expediente").trim();
@@ -1538,6 +1923,7 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
     if(huboCambioEstado || nota || isNew) exp.fecha_ultimo_movimiento = ahora;
 
     if(isNew) state.expedientes.push(exp);
+    exp.ejemplo = false; // lo que el usuario guarda es dato real, no muestra
     save();
     closeModal();
     renderList();
@@ -1547,6 +1933,8 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   function onDelete(){
     if(!state.editingId) return;
     state.expedientes = state.expedientes.filter(function(x){return x.id!==state.editingId;});
+    // Borrar un ejemplo descarta la demo completa: no tiene sentido quedarse
+    // con 4 de 5 expedientes de muestra.
     save(); closeModal(); renderList();
     if(!viewDash.hidden) renderDashboard();
   }
@@ -1568,11 +1956,19 @@ button.mrow.sel .mrow-track{box-shadow:0 0 0 2px var(--accent)}
   applyThemeButton();
 
   renderList();
-  if(location.hash === "#dashboard") showView("dashboard"); else showView("list");
+  showView(location.hash === "#dashboard" ? "dashboard" : "list", true);
   bajarCambiosIniciales();
 
+  // Ruta absoluta a propósito: con not_found_handling = single-page-application
+  // cualquier path devuelve index.html, así que 'sw.js' relativo resuelto desde
+  // /algo/otro pedía /algo/sw.js y recibía HTML — el registro fallaba por MIME.
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
+    navigator.serviceWorker.register('/sw.js', {scope:'/'}).catch(function(err){
+      console.warn("[sw] no se pudo registrar:", err && err.message);
+    });
   }
 })();
 </script>
+
+</body>
+</html>
