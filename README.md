@@ -5,6 +5,20 @@ archivo `datos.json` en este repo, versionado, editado solo por el Worker.
 
 Repo de datos: `joaqu-coder/Parques-Industriales`, archivo `datos.json`.
 
+## Documentación
+
+| Documento | Para quién |
+|---|---|
+| [`docs/MANUAL-DE-USO.md`](docs/MANUAL-DE-USO.md) | Quien carga y sigue los expedientes. No requiere nada técnico. |
+| [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) | Cómo opera la app: modelo de datos, relaciones, semáforo, flujos de sync, mapa del código. |
+| [`docs/PENDIENTES.md`](docs/PENDIENTES.md) | Qué falta, ordenado por riesgo, y las decisiones que hay que tomar. |
+| Este README | Deploy, las trampas ya pisadas y las limitaciones aceptadas. |
+
+> ⚠️ Antes de seguir, leé los tres puntos críticos de
+> [`docs/PENDIENTES.md`](docs/PENDIENTES.md): hoy los datos se escriben en una
+> rama de trabajo temporal, el repo es público con datos personales adentro y
+> `/api/sync` no tiene autenticación.
+
 **La rama ya no está hardcodeada.** El Worker la resuelve así:
 
 1. Si existe la variable de entorno `GITHUB_RAMA`, usa esa — y verifica que la
