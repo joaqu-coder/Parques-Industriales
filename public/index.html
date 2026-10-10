@@ -1,3 +1,5 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cartas de Intención — Parques Industriales</title>
 <script>
 (function(){
@@ -68,7 +70,6 @@ svg text{font-family:var(--font-body)}
 .exp-card-empresa{font-size:15px;font-weight:700;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .exp-card-aside{flex:0 0 auto;display:flex;align-items:center;gap:6px}
 .exp-card-sub{font-size:11.5px;color:var(--muted);margin-top:3px}
-.example-tag{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px dashed var(--accent);border-radius:4px;padding:1px 5px;margin-left:6px;white-space:nowrap}
 .empty-state{padding:30px 14px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 
 .badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:6px;padding:3px 8px;white-space:nowrap}
@@ -152,6 +153,23 @@ svg text{font-family:var(--font-body)}
 .settings-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-bottom:16px;flex-wrap:wrap}
 .settings-row input{width:64px;background:var(--surface);border:1px solid var(--border);color:var(--fg);border-radius:6px;padding:5px 7px;font-family:var(--font-mono)}
 
+/* ---- Resoluciones ---- */
+#viewRes .toolbar input[type=search]{flex:1 1 240px;min-width:0}
+.res-count{font-size:12px;color:var(--muted);margin-bottom:12px;font-variant-numeric:tabular-nums}
+.res-list{display:flex;flex-direction:column;gap:8px}
+.res-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;cursor:pointer;text-align:left;width:100%}
+.res-card:hover{border-color:var(--accent)}
+.res-card-main{min-width:0}
+.res-card-nro{font-family:var(--font-mono);font-size:13.5px;font-weight:700}
+.res-card-snippet{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.res-card-sub{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res-card-aside{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.chip{display:inline-flex;align-items:center;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--surface-2);color:var(--muted);border-radius:6px;padding:3px 8px;white-space:nowrap}
+.res-fecha{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.res-more{display:flex;justify-content:center;margin-top:12px}
+.res-contenido{font-size:13.5px;line-height:1.5;white-space:pre-wrap;margin:0}
+.res-head h2{font-family:var(--font-mono);font-size:16px}
+
 /* ---- Indicador de sincronización ---- */
 .sync-status{font-size:11.5px;color:var(--muted);white-space:nowrap}
 .sync-status.offline{color:var(--danger)}
@@ -172,6 +190,7 @@ svg text{font-family:var(--font-body)}
 <div class="tabs">
   <button class="tab" id="tabList">Listado</button>
   <button class="tab" id="tabDash">Dashboard</button>
+  <button class="tab" id="tabRes">Resoluciones</button>
 </div>
 
 <!-- ===== VISTA LISTADO ===== -->
@@ -244,6 +263,21 @@ svg text{font-family:var(--font-body)}
 
 </section>
 
+<!-- ===== VISTA RESOLUCIONES ===== -->
+<!-- Corpus histórico (public/resoluciones.json), solo lectura: no se edita
+     desde la PWA ni viaja por /api/sync. -->
+<section class="view" id="viewRes" hidden>
+  <div class="toolbar">
+    <select id="filterResAnio"><option value="">Todos los años</option></select>
+    <select id="filterResTema"><option value="">Todos los temas</option></select>
+    <select id="filterResAutoridad"><option value="">Todas las autoridades</option></select>
+    <input type="search" id="searchRes" placeholder="Buscar número, expediente, texto…">
+  </div>
+  <div class="res-count" id="resCount"></div>
+  <div class="res-list" id="resList"></div>
+  <div class="res-more" id="resMore"></div>
+</section>
+
 <div class="veil" id="veil" hidden><div class="modal" id="modal"></div></div>
 
 <script>
@@ -259,6 +293,8 @@ svg text{font-family:var(--font-body)}
     {id:"En_tratamiento",  label:"En tratamiento"},
     {id:"Adjudicada",      label:"Adjudicada"}
   ];
+  var RESOLUCIONES_URL = "resoluciones.json";
+  var RES_PAGINA = 100; // cuántas tarjetas se pintan por tanda
   var STORAGE_KEY = "cartas_intencion_parques_v2";
   var PLAZO_KEY = "cartas_intencion_plazo_v1";
 
@@ -375,52 +411,27 @@ svg text{font-family:var(--font-body)}
     return {color:sem.color, orden:sem.orden, texto:textoPlazo(plazo)};
   }
 
-  // ---- Datos de ejemplo ----
-  function ejemplos(){
-    var hoy = horaLocal();
-    return [
-      {id:uid(), ejemplo:true, nro_expediente:"363-65027/2026-0", fecha_inicio:"15/04/2026",
-       nombre_empresa:"Premoldeados del Norte S.A.",
-       parque_industrial:"Salta", rubro:"Materiales de construcción", superficie_solicitada_m2:1200,
-       actividad_empresa:"Fábrica de premoldeados de hormigón", situacion:"En_tratamiento",
-       representante_nombre:"Manuel Molina", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:hoy,
-       intervenciones:[{hora:hoy, texto:"Expediente cargado como ejemplo. Podés editarlo o eliminarlo.", tipo:"sistema"}]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-71140/2026-0", fecha_inicio:"02/02/2026",
-       nombre_empresa:"Logística del Valle S.R.L.",
-       parque_industrial:"Güemes", rubro:"Logística", superficie_solicitada_m2:800,
-       actividad_empresa:"Depósito y logística de insumos agrícolas", situacion:"Sin_tratamiento",
-       representante_nombre:"Carla Ibáñez", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"02/02/2026", intervenciones:[]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-40882/2025-0", fecha_inicio:"11/09/2025",
-       nombre_empresa:"Acopiadora Pichanal S.A.",
-       parque_industrial:"Pichanal", rubro:"Alimenticia", superficie_solicitada_m2:2500,
-       actividad_empresa:"Planta de acopio y secado de granos", situacion:"Adjudicada",
-       representante_nombre:"Jorge Villagrán", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"20/01/2026",
-       intervenciones:[{hora:"20/01/2026 10:15", texto:"Cambio de situación: En_tratamiento → Adjudicada", tipo:"sistema"}]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-58213/2025-0", fecha_inicio:"05/03/2025",
-       nombre_empresa:"Metalúrgica Ortiz Hnos.",
-       parque_industrial:"Salta", rubro:"Metalmecánica", superficie_solicitada_m2:950,
-       actividad_empresa:"Taller de mecanizado y estructuras metálicas", situacion:"Adjudicada",
-       representante_nombre:"Rubén Ortiz", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"18/08/2025", intervenciones:[]},
-      {id:uid(), ejemplo:true, nro_expediente:"363-12044/2026-0", fecha_inicio:"20/01/2026",
-       nombre_empresa:"Agroquímica Patricia Luna",
-       parque_industrial:"RDLF", rubro:"Química", superficie_solicitada_m2:1800,
-       actividad_empresa:"Formulación de agroquímicos", situacion:"En_tratamiento",
-       representante_nombre:"Patricia Luna", contacto_tel:"", contacto_mail:"",
-       fecha_ultimo_movimiento:"03/06/2026", intervenciones:[]}
-    ];
+  // Las primeras versiones sembraban expedientes de ejemplo (ejemplo:true).
+  // Ya no: si quedaron guardados en localStorage o en datos.json, se descartan.
+  function sinEjemplos(arr){
+    return arr.filter(function(e){ return !e || e.ejemplo !== true; });
   }
 
   function load(){
     try{
       var raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return ejemplos();
+      if(!raw) return [];
       var data = JSON.parse(raw);
-      return (Array.isArray(data) && data.length) ? data : ejemplos();
-    }catch(e){ return ejemplos(); }
+      if(!Array.isArray(data)) return [];
+      var limpios = sinEjemplos(data);
+      // la limpieza se persiste local, pero NO se marca para subir: eso lo
+      // decide bajarCambiosIniciales() con los datos del servidor en la mano,
+      // para no pisar expedientes que este navegador todavía no vio.
+      if(limpios.length !== data.length){
+        try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(limpios)); }catch(e2){}
+      }
+      return limpios;
+    }catch(e){ return []; }
   }
   function save(){
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes)); }catch(e){}
@@ -497,9 +508,13 @@ svg text{font-family:var(--font-body)}
       if(!resp.ok) throw new Error("GET falló: "+resp.status);
       var datos = await resp.json();
       if(datos && Array.isArray(datos.expedientes) && datos.expedientes.length){
-        state.expedientes = datos.expedientes;
+        var remotos = datos.expedientes;
+        var limpios = sinEjemplos(remotos);
+        state.expedientes = limpios;
         if(datos.plazoDias){ state.plazoDias = datos.plazoDias; plazoInput.value = state.plazoDias; }
         try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expedientes)); localStorage.setItem(PLAZO_KEY, String(state.plazoDias)); }catch(e){}
+        // había ejemplos arriba: ahora sí corresponde subir la limpieza
+        if(limpios.length !== remotos.length) marcarPendiente();
         renderList();
         if(!viewDash.hidden) renderDashboard();
       }
@@ -509,21 +524,29 @@ svg text{font-family:var(--font-body)}
     }
   }
 
-  var state = { expedientes: load(), editingId: null, modalMode: null, filterParque:"", filterRubro:"", filterSituacion:"", search:"", plazoDias: loadPlazo() };
+  var state = { expedientes: load(), editingId: null, modalMode: null, filterParque:"", filterRubro:"", filterSituacion:"", search:"", plazoDias: loadPlazo(),
+                resoluciones: null, resEstado: "inicial", resViewId: null,
+                filterResAnio:"", filterResTema:"", filterResAutoridad:"", searchRes:"", resLimite: RES_PAGINA };
 
   // ---- Tabs / routing ----
-  var tabList = document.getElementById("tabList"), tabDash = document.getElementById("tabDash");
-  var viewList = document.getElementById("viewList"), viewDash = document.getElementById("viewDash");
+  var tabList = document.getElementById("tabList"), tabDash = document.getElementById("tabDash"), tabRes = document.getElementById("tabRes");
+  var viewList = document.getElementById("viewList"), viewDash = document.getElementById("viewDash"), viewRes = document.getElementById("viewRes");
+  var HASH = {list:"", dashboard:"#dashboard", resoluciones:"#resoluciones"};
   function showView(name){
-    var isDash = name==="dashboard";
-    viewList.hidden = isDash; viewDash.hidden = !isDash;
-    tabList.classList.toggle("active", !isDash);
-    tabDash.classList.toggle("active", isDash);
-    if(isDash) renderDashboard();
-    location.hash = isDash ? "#dashboard" : "";
+    if(HASH[name]==null) name = "list";
+    viewList.hidden = name!=="list";
+    viewDash.hidden = name!=="dashboard";
+    viewRes.hidden  = name!=="resoluciones";
+    tabList.classList.toggle("active", name==="list");
+    tabDash.classList.toggle("active", name==="dashboard");
+    tabRes.classList.toggle("active", name==="resoluciones");
+    if(name==="dashboard") renderDashboard();
+    if(name==="resoluciones") cargarResoluciones();
+    location.hash = HASH[name];
   }
   tabList.addEventListener("click", function(){ showView("list"); });
   tabDash.addEventListener("click", function(){ showView("dashboard"); });
+  tabRes.addEventListener("click", function(){ showView("resoluciones"); });
 
   // ---- Filtros ----
   var selParque = document.getElementById("filterParque");
@@ -566,7 +589,11 @@ svg text{font-family:var(--font-body)}
       return oa - ob;
     });
     if(!filtrados.length){
-      cont.innerHTML = '<div class="empty-state">Sin expedientes que coincidan con el filtro.</div>';
+      cont.innerHTML = '<div class="empty-state">'+
+        (state.expedientes.length
+          ? 'Sin expedientes que coincidan con el filtro.'
+          : 'Todavía no hay expedientes cargados. Usá “+ Nuevo expediente”.')+
+        '</div>';
       return;
     }
     var SIT_BADGE = {Adjudicada:"b-ok", En_tratamiento:"b-warn", Sin_tratamiento:"b-idle"};
@@ -575,7 +602,7 @@ svg text{font-family:var(--font-body)}
       var sub = [e.parque_industrial, e.rubro].filter(Boolean).join(" · ");
       return '<button class="exp-card" data-open="'+e.id+'">'+
         '<div class="exp-card-main">'+
-          '<div class="exp-card-exp">'+esc(e.nro_expediente||"s/n")+(e.ejemplo?'<span class="example-tag">Ejemplo</span>':'')+'</div>'+
+          '<div class="exp-card-exp">'+esc(e.nro_expediente||"s/n")+'</div>'+
           '<div class="exp-card-empresa">'+esc(e.nombre_empresa||"(sin nombre de empresa)")+'</div>'+
           (sub?'<div class="exp-card-sub">'+esc(sub)+'</div>':'')+
         '</div>'+
@@ -721,6 +748,191 @@ svg text{font-family:var(--font-body)}
     }).join("");
   }
 
+  // ---- Resoluciones (solo lectura, corpus histórico) ----
+  var resList = document.getElementById("resList");
+  var resCount = document.getElementById("resCount");
+  var resMore = document.getElementById("resMore");
+  var selResAnio = document.getElementById("filterResAnio");
+  var selResTema = document.getElementById("filterResTema");
+  var selResAutoridad = document.getElementById("filterResAutoridad");
+
+  async function cargarResoluciones(){
+    if(state.resEstado==="cargando" || state.resEstado==="ok") return;
+    state.resEstado = "cargando";
+    renderResoluciones();
+    try{
+      var resp = await fetch(RESOLUCIONES_URL, {cache:"no-cache"});
+      if(!resp.ok) throw new Error("GET resoluciones falló: "+resp.status);
+      var datos = await resp.json();
+      if(!Array.isArray(datos)) throw new Error("formato inesperado");
+      state.resoluciones = datos.slice().sort(function(a,b){
+        if(a.anio!==b.anio) return b.anio-a.anio;          // más nuevas primero
+        var d = nroResolucion(b)-nroResolucion(a);
+        if(d) return d;
+        return String(b.fecha||"").localeCompare(String(a.fecha||""));
+      });
+      state.resEstado = "ok";
+      poblarFiltrosRes();
+    }catch(e){
+      state.resEstado = "error";
+    }
+    renderResoluciones();
+  }
+
+  function nroResolucion(r){
+    var m = /\d+/.exec(String(r.numero_resolucion==null?"":r.numero_resolucion));
+    return m ? parseInt(m[0],10) : 0;
+  }
+
+  function etiquetaResolucion(r){
+    var n = (r.numero_resolucion==null || r.numero_resolucion==="") ? "s/n" : r.numero_resolucion;
+    return "Resolución N° "+n+"/"+r.anio;
+  }
+
+  // Las fechas vienen del archivo tal cual: hay "Falta", "Sin fecha" y algunas
+  // mal tipeadas. Las ISO se muestran dd/mm/aaaa; el resto, literal.
+  function fechaResolucion(f){
+    var s = String(f==null?"":f).trim();
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    return m ? m[3]+"/"+m[2]+"/"+m[1] : s;
+  }
+
+  function opcionesSelect(sel, valores, placeholder){
+    sel.innerHTML = '<option value="">'+esc(placeholder)+'</option>'+
+      valores.map(function(v){ return '<option value="'+esc(v)+'">'+esc(v)+'</option>'; }).join("");
+  }
+
+  function poblarFiltrosRes(){
+    var lista = state.resoluciones || [];
+    var anios = [], temas = [], autoridades = [];
+    lista.forEach(function(r){
+      if(r.anio!=null && anios.indexOf(r.anio)===-1) anios.push(r.anio);
+      if(r.tema && temas.indexOf(r.tema)===-1) temas.push(r.tema);
+      if(r.autoridad && autoridades.indexOf(r.autoridad)===-1) autoridades.push(r.autoridad);
+    });
+    anios.sort(function(a,b){return b-a;});
+    temas.sort(function(a,b){return a.localeCompare(b,"es");});
+    autoridades.sort(function(a,b){return a.localeCompare(b,"es");});
+    opcionesSelect(selResAnio, anios, "Todos los años");
+    opcionesSelect(selResTema, temas, "Todos los temas");
+    opcionesSelect(selResAutoridad, autoridades, "Todas las autoridades");
+    selResAnio.value = state.filterResAnio;
+    selResTema.value = state.filterResTema;
+    selResAutoridad.value = state.filterResAutoridad;
+  }
+
+  function resolucionesFiltradas(){
+    return (state.resoluciones||[]).filter(function(r){
+      if(state.filterResAnio && String(r.anio)!==state.filterResAnio) return false;
+      if(state.filterResTema && r.tema!==state.filterResTema) return false;
+      if(state.filterResAutoridad && r.autoridad!==state.filterResAutoridad) return false;
+      if(state.searchRes){
+        var blob = [r.numero_resolucion, r.anio, r.fecha, r.tema, r.numero_expediente,
+                    r.autoridad, r.observaciones, r.contenido].join(" ").toLowerCase();
+        if(blob.indexOf(state.searchRes)===-1) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderResoluciones(){
+    if(state.resEstado==="cargando" || state.resEstado==="inicial"){
+      resCount.textContent = "";
+      resMore.innerHTML = "";
+      resList.innerHTML = '<div class="empty-state">Cargando resoluciones…</div>';
+      return;
+    }
+    if(state.resEstado==="error"){
+      resCount.textContent = "";
+      resMore.innerHTML = "";
+      resList.innerHTML = '<div class="empty-state">No se pudieron cargar las resoluciones. '+
+        'Revisá la conexión y volvé a intentar.</div>';
+      return;
+    }
+    var filtradas = resolucionesFiltradas();
+    var total = (state.resoluciones||[]).length;
+    resCount.textContent = filtradas.length===total
+      ? total+" resoluciones"+(rangoAnios()?" ("+rangoAnios()+")":"")
+      : filtradas.length+" de "+total+" resoluciones";
+    if(!filtradas.length){
+      resMore.innerHTML = "";
+      resList.innerHTML = '<div class="empty-state">Ninguna resolución coincide con el filtro.</div>';
+      return;
+    }
+    var visibles = filtradas.slice(0, state.resLimite);
+    resList.innerHTML = visibles.map(function(r){
+      var sub = [r.numero_expediente ? "Exp. "+r.numero_expediente : "", r.autoridad].filter(Boolean).join(" · ");
+      var fecha = fechaResolucion(r.fecha);
+      return '<button class="res-card" data-res="'+esc(r.id)+'">'+
+        '<div class="res-card-main">'+
+          '<div class="res-card-nro">'+esc(etiquetaResolucion(r))+'</div>'+
+          (r.contenido?'<div class="res-card-snippet">'+esc(r.contenido)+'</div>':'')+
+          (sub?'<div class="res-card-sub">'+esc(sub)+'</div>':'')+
+        '</div>'+
+        '<div class="res-card-aside">'+
+          (r.tema?'<span class="chip">'+esc(r.tema)+'</span>':'')+
+          (fecha?'<span class="res-fecha">'+esc(fecha)+'</span>':'')+
+        '</div>'+
+        '</button>';
+    }).join("");
+    resList.querySelectorAll("[data-res]").forEach(function(btn){
+      btn.addEventListener("click", function(){ openResolucion(btn.getAttribute("data-res")); });
+    });
+    var restantes = filtradas.length - visibles.length;
+    resMore.innerHTML = restantes>0
+      ? '<button type="button" class="btn-ghost" id="btnResMore">Mostrar '+Math.min(restantes,RES_PAGINA)+' más ('+restantes+' restantes)</button>'
+      : "";
+    var masBtn = document.getElementById("btnResMore");
+    if(masBtn) masBtn.addEventListener("click", function(){
+      state.resLimite += RES_PAGINA;
+      renderResoluciones();
+    });
+  }
+
+  function rangoAnios(){
+    var anios = (state.resoluciones||[]).map(function(r){return r.anio;})
+      .filter(function(a){return typeof a==="number";});
+    if(!anios.length) return "";
+    var min = Math.min.apply(null, anios), max = Math.max.apply(null, anios);
+    return min===max ? String(min) : min+"–"+max;
+  }
+
+  function cambioFiltroRes(){ state.resLimite = RES_PAGINA; renderResoluciones(); }
+  selResAnio.addEventListener("change", function(){ state.filterResAnio=this.value; cambioFiltroRes(); });
+  selResTema.addEventListener("change", function(){ state.filterResTema=this.value; cambioFiltroRes(); });
+  selResAutoridad.addEventListener("change", function(){ state.filterResAutoridad=this.value; cambioFiltroRes(); });
+  document.getElementById("searchRes").addEventListener("input", function(){
+    state.searchRes = this.value.trim().toLowerCase();
+    cambioFiltroRes();
+  });
+
+  function openResolucion(id){
+    var r = (state.resoluciones||[]).find(function(x){return x.id===id;});
+    if(!r) return;
+    state.resViewId = id;
+    veil.hidden = false;
+    modal.innerHTML =
+      '<div class="modal-head res-head"><h2>'+esc(etiquetaResolucion(r))+'</h2>'+
+        '<button class="x-close" id="xClose">&times;</button></div>'+
+      '<div class="view-grid">'+
+        viewItem("Fecha", fechaResolucion(r.fecha))+
+        viewItem("Tema", r.tema)+
+        viewItem("Expediente", r.numero_expediente)+
+        viewItem("Autoridad", r.autoridad)+
+      '</div>'+
+      '<div class="view-section"><h3>Contenido</h3>'+
+        (r.contenido
+          ? '<p class="res-contenido">'+esc(r.contenido)+'</p>'
+          : '<p class="view-empty">Sin texto cargado.</p>')+
+      '</div>'+
+      (r.observaciones
+        ? '<div class="view-section"><h3>Observaciones</h3><p class="res-contenido">'+esc(r.observaciones)+'</p></div>'
+        : '')+
+      '<div class="view-actions"><button type="button" class="btn-ghost" id="btnResClose">Cerrar</button></div>';
+    document.getElementById("xClose").addEventListener("click", closeModal);
+    document.getElementById("btnResClose").addEventListener("click", closeModal);
+  }
+
   // ---- Modal: nuevo / editar ----
   var veil = document.getElementById("veil"), modal = document.getElementById("modal");
   document.getElementById("btnNew").addEventListener("click", function(){ openModal(null); });
@@ -842,7 +1054,7 @@ svg text{font-family:var(--font-body)}
       : '<div class="hist-empty">Sin notas aún.</div>';
     return '<div class="hist"><h3>Historial ('+notas.length+')</h3>'+body+'</div>';
   }
-  function closeModal(){ veil.hidden = true; state.editingId = null; state.modalMode = null; }
+  function closeModal(){ veil.hidden = true; state.editingId = null; state.modalMode = null; state.resViewId = null; }
 
   function onSave(ev){
     ev.preventDefault();
@@ -853,7 +1065,7 @@ svg text{font-family:var(--font-body)}
 
     var situacionAnterior = existing ? existing.situacion : null;
     var situacionNueva = g("situacion") || "Sin_tratamiento";
-    var exp = existing || {id:uid(), ejemplo:false, intervenciones:[]};
+    var exp = existing || {id:uid(), intervenciones:[]};
 
     exp.nro_expediente = g("nro_expediente").trim();
     exp.nombre_empresa = g("nombre_empresa").trim();
@@ -908,7 +1120,8 @@ svg text{font-family:var(--font-body)}
   applyThemeButton();
 
   renderList();
-  if(location.hash === "#dashboard") showView("dashboard"); else showView("list");
+  var VISTA_POR_HASH = {"#dashboard":"dashboard", "#resoluciones":"resoluciones"};
+  showView(VISTA_POR_HASH[location.hash] || "list");
   bajarCambiosIniciales();
 
   if('serviceWorker' in navigator){
