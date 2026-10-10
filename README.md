@@ -60,9 +60,8 @@ Decisiones de la conversión, por si hay que repetirla:
   `9/1/26` es el 1 de septiembre de 2026). Es la fecha con la que corre el
   semáforo de plazo. 24 expedientes no la tienen: quedan sin semáforo.
 - `anio_inicio_expediente` ← "Fecha de inicio expe." (solo el año). Se guarda
-  aparte y el gráfico anual lo usa como respaldo cuando no hay fecha de
-  presentación. En 18 filas ese año no coincide con el de la presentación: es
-  así en la planilla, no se tocó.
+  aparte, todavía sin uso en la app. En 18 filas ese año no coincide con el de
+  la presentación: es así en la planilla, no se tocó.
 - Situación: `ACTIVO` → **En tratamiento**, `DESESTIMADO` → **Desestimada**
   (situación nueva, no corre plazo, igual que Adjudicada).
 - Rubro ← "Actividad", normalizando mayúsculas y typos (`Contrucción` →

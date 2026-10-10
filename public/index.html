@@ -55,8 +55,7 @@ svg text{font-family:var(--font-body)}
 /* ---- Dashboard stat tiles ---- */
 .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px}
 .tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0}
-.tile .num{font-family:var(--font-mono);font-size:26px;font-weight:700;line-height:1.1;overflow-wrap:anywhere}
-.tile .num.num-sm{font-size:17px;line-height:1.35}
+.tile .num{font-family:var(--font-mono);font-size:26px;font-weight:700;line-height:1.1}
 .tile .label{font-size:12px;color:var(--muted);margin-top:2px}
 
 .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
@@ -562,12 +561,8 @@ svg text{font-family:var(--font-body)}
   }
 
   // ---- Dashboard ----
-  function m2(v){ return Math.round(v).toLocaleString("es-AR")+" m²"; }
-
   function tile(num,label,cls){
-    // los totales de superficie son largos: a partir de cierto largo, cuerpo chico
-    var klass = (cls||"")+(String(num).length>9 ? " num-sm" : "");
-    return '<div class="tile"><div class="num '+klass+'">'+esc(num)+'</div><div class="label">'+esc(label)+'</div></div>';
+    return '<div class="tile"><div class="num '+(cls||"")+'">'+esc(num)+'</div><div class="label">'+esc(label)+'</div></div>';
   }
 
   function renderDashboard(){
@@ -587,17 +582,16 @@ svg text{font-family:var(--font-body)}
 
     document.getElementById("summary").innerHTML =
       tile(list.length, "Expedientes totales") +
-      tile(m2(totalM2), "Superficie total solicitada") +
+      tile(totalM2.toLocaleString("es-AR")+" m²", "Superficie total solicitada") +
       tile(porSituacion.Adjudicada, "Adjudicados") +
       tile(porSituacion.En_tratamiento, "En tratamiento") +
-      tile(porSituacion.Sin_tratamiento, "Sin tratamiento") +
-      tile(porSituacion.Desestimada, "Desestimadas");
+      tile(porSituacion.Sin_tratamiento, "Sin tratamiento");
 
     // -- m² por parque (barras horizontales, un solo color) --
     var m2PorParque = {};
     PARQUES.forEach(function(p){ m2PorParque[p]=0; });
     list.forEach(function(e){ if(e.parque_industrial) m2PorParque[e.parque_industrial] = (m2PorParque[e.parque_industrial]||0) + (Number(e.superficie_solicitada_m2)||0); });
-    renderBarList("chartM2", m2PorParque, m2);
+    renderBarList("chartM2", m2PorParque, function(v){ return v.toLocaleString("es-AR")+" m²"; });
 
     // -- situación (barras horizontales, color por status) --
     var sitColor = {Adjudicada:"var(--ok)", En_tratamiento:"var(--warn)", Sin_tratamiento:"var(--idle)", Desestimada:"var(--danger)"};
@@ -641,9 +635,8 @@ svg text{font-family:var(--font-body)}
     var porAnio = {}; // {anio: {parque: count}}
     list.forEach(function(e){
       var d = parseFechaLocal(e.fecha_inicio);
-      // la planilla trae expedientes sin fecha de presentación pero con año de inicio
-      var anio = d ? d.getFullYear() : parseInt(e.anio_inicio_expediente,10);
-      if(!anio) return;
+      if(!d) return;
+      var anio = d.getFullYear();
       porAnio[anio] = porAnio[anio] || {};
       porAnio[anio][e.parque_industrial] = (porAnio[anio][e.parque_industrial]||0) + 1;
     });
